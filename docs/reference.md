@@ -202,7 +202,8 @@ end
 | `at(list: xs, index: i)` | Option[T]。範囲の外なら None |
 | `get(list: xs, index: i)` | T。範囲の外なら R506。`i < len(list: xs)` を確かめてから使う |
 | `find(list: xs, func: f)` | Option[T]。f が true になる最初の要素 |
-| `append(list: xs, item: x)` | List[T]。新しいリストを返す |
+| `append(list: xs, item: x)` | List[T]。新しいリストを返す（毎回写すので、長い並びを1つずつ足していくと長さの2乗になる。たくさん足すときは小さな並びを作って concat） |
+| `concat(lists: xss)` | List[T]。並びの並びを順に1つにつなぐ（全体の長さに比例する時間） |
 | `map(list: xs, func: f)` | List[U]。f: fn(T) -> U |
 | `filter(list: xs, func: f)` | List[T]。f: fn(T) -> Bool |
 | `fold(list: xs, init: z, func: f)` | f: fn(たまった値, 要素) -> たまった値 |

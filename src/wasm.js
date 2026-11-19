@@ -4,7 +4,7 @@
 //
 // 扱えるもの：Int・Bool・Str・Unit・List・Option・Result・自分で作る型、関数・再帰、let、if・when・match、requires・ensures、
 //   print・to_str・str_len・parse_int・trim・chars・split・join・contains・starts_with・ends_with・lines、
-//   html・html_text・html_join・sql（Html は文字と同じ形。Sql は [型紙][値のリスト]）、リストの関数（len・get・at・range・append・map・filter・fold・find・any・all・
+//   html・html_text・html_join・sql（Html は文字と同じ形。Sql は [型紙][値のリスト]）、リストの関数（len・get・at・range・append・concat・map・filter・fold・find・any・all・
 //   reverse・take・drop・sort・sum・max・min）、+ - * / %、比較（== は中身まで比べる）、and・or・not、++（Str・List）。
 // それ以外を使うと E600（コンパイラがまだ扱えない）。そのプログラムは akashi run（インタプリタ）で動かす。
 //
@@ -74,7 +74,7 @@ class Unsupported extends Error {
   constructor(what, pos) { super(what); this.what = what; this.pos = pos; }
 }
 
-const LIST_BUILTINS = ['len', 'get', 'at', 'range', 'append', 'map', 'filter', 'fold', 'find', 'any', 'all', 'reverse', 'take', 'drop', 'sort', 'sum', 'max', 'min'];
+const LIST_BUILTINS = ['len', 'get', 'at', 'range', 'append', 'concat', 'map', 'filter', 'fold', 'find', 'any', 'all', 'reverse', 'take', 'drop', 'sort', 'sum', 'max', 'min'];
 const TEXT_BUILTINS = ['chars', 'split', 'join', 'contains', 'starts_with', 'ends_with', 'lines', 'html', 'html_text', 'html_join', 'sql'];
 const DICT_BUILTINS = ['dict', 'dict_put', 'dict_get', 'dict_has', 'dict_remove', 'dict_keys', 'dict_values', 'dict_size'];
 const CAPS = ['Console', 'Folder', 'OutFolder']; // 鍵。実行時には何も渡さない（Folder・OutFolder は WASI の「read」「write」という名前の preopen）
@@ -249,15 +249,20 @@ class Compiler {
     const nl = this.str('\n');
     const r504 = this.str('R504 integer overflow');
     const r505 = this.str(`R505 recursion deeper than ${MAX_DEPTH} calls`);
+    const r513 = this.str('R513 out of memory');
     return [
       { // alloc(n) -> 場所。4 の倍数にそろえ、足りなければメモリを増やす
+        // 大きすぎる n・場所の数があふれて小さく戻る・メモリを増やせないときは R513 で止める
+        // （あふれたまま進むと、前に作った値の上に書いてしまう。2026-11-19 に join の2乗の確保で見つけた）
         params: [I32], results: [I32], locals: [I32],
         body: [
+          ...op.localGet(0), ...op.i32(0x40000000), ...op.i32GtU, ...op.if(EMPTY), ...op.i32(r513), ...op.call(h.fail), ...op.end,
           ...op.globalGet(G.heap), ...op.localSet(1),
           ...op.globalGet(G.heap), ...op.localGet(0), ...op.i32Add, ...op.i32(3), ...op.i32Add, ...op.i32(-4), ...op.i32And, ...op.globalSet(G.heap),
+          ...op.globalGet(G.heap), ...op.localGet(1), ...op.i32LtU, ...op.if(EMPTY), ...op.i32(r513), ...op.call(h.fail), ...op.end,
           ...op.block(EMPTY), ...op.loop(EMPTY),
           ...op.globalGet(G.heap), ...op.memorySize, ...op.i32(16), ...op.i32Shl, ...op.i32LtU, ...op.brIf(1),
-          ...op.i32(1), ...op.memoryGrow, ...op.i32(-1), ...op.i32Eq, ...op.if(EMPTY), ...op.unreachable, ...op.end,
+          ...op.i32(1), ...op.memoryGrow, ...op.i32(-1), ...op.i32Eq, ...op.if(EMPTY), ...op.i32(r513), ...op.call(h.fail), ...op.end,
           ...op.br(0), ...op.end, ...op.end,
           ...op.localGet(1), ...op.end,
         ],
@@ -705,17 +710,17 @@ class Compiler {
     }
   }
 
+  // 要素の文字を並びに集めてから join でつなぐ（1つずつ concat すると、長いリストで長さの2乗になる）
   showListFn(t, pos) {
     return this.gen(`show ${typeStr(t)}`, [I32], [I32], (local) => {
-      const [n, i, acc] = [local(I32), local(I32), local(I32)];
-      const cat = (code) => [...op.localGet(acc), ...code, ...op.call(this.h.concat), ...op.localSet(acc)];
+      const [n, i, parts] = [local(I32), local(I32), local(I32)];
       return [
-        ...op.i32(this.str('[')), ...op.localSet(acc), ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n),
+        ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n), ...this.newList(n, parts),
         ...forEach(i, n, [
-          ...op.localGet(i), ...op.if(EMPTY), ...cat(op.i32(this.str(', '))), ...op.end,
-          ...cat(this.showCode(t.of, this.loadAt(t.of, elemAddr(0, i), 8, pos), true, pos)),
+          ...elemAddr(parts, i), ...this.showCode(t.of, this.loadAt(t.of, elemAddr(0, i), 8, pos), true, pos), ...op.i32Store(8),
         ]),
-        ...cat(op.i32(this.str(']'))), ...op.localGet(acc),
+        ...op.i32(this.str('[')), ...op.localGet(parts), ...op.i32(this.str(', ')), ...op.call(this.joinFn()), ...op.call(this.h.concat),
+        ...op.i32(this.str(']')), ...op.call(this.h.concat),
       ];
     });
   }
@@ -830,7 +835,9 @@ class Compiler {
   // ---- リスト ----
   // 新しいリスト（長さ n）を作り、その場所を局所変数 p に入れる
   newList(n, p) {
-    return [...op.localGet(n), ...op.i32(8), ...op.i32Mul, ...op.i32(8), ...op.i32Add, ...op.call(this.h.alloc), ...op.localTee(p), ...op.localGet(n), ...op.i32Store(0)];
+    return [
+      ...op.localGet(n), ...op.i32(0x08000000), ...op.i32GtU, ...op.if(EMPTY), ...op.i32(this.str('R513 out of memory')), ...op.call(this.h.fail), ...op.end,
+      ...op.localGet(n), ...op.i32(8), ...op.i32Mul, ...op.i32(8), ...op.i32Add, ...op.call(this.h.alloc), ...op.localTee(p), ...op.localGet(n), ...op.i32Store(0)];
   }
 
   // 要素を n 個写す（どれも 8 バイト）
@@ -840,6 +847,24 @@ class Compiler {
       ...op.localGet(src), ...op.i32(8), ...op.i32Add, ...srcAt, ...op.i32(8), ...op.i32Mul, ...op.i32Add,
       ...n, ...op.i32(8), ...op.i32Mul, ...op.memoryCopy,
     ];
+  }
+
+  // concat：長さを先に足して1回だけ確保し、順に写す（要素はどれも 8 バイトなので型によらない）
+  concatListsFn() {
+    return this.gen('concat lists', [I32], [I32], (local) => {
+      const [n, i, total, p, k, inner] = [local(I32), local(I32), local(I32), local(I32), local(I32), local(I32)];
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n), ...op.i32(0), ...op.localSet(total),
+        ...forEach(i, n, [...op.localGet(total), ...elemAddr(0, i), ...op.i32Load(8), ...op.i32Load(0), ...op.i32Add, ...op.localSet(total)]),
+        ...this.newList(total, p), ...op.i32(0), ...op.localSet(k),
+        ...forEach(i, n, [
+          ...elemAddr(0, i), ...op.i32Load(8), ...op.localSet(inner),
+          ...this.copyElems(p, op.localGet(k), inner, op.i32(0), [...op.localGet(inner), ...op.i32Load(0)]),
+          ...op.localGet(k), ...op.localGet(inner), ...op.i32Load(0), ...op.i32Add, ...op.localSet(k),
+        ]),
+        ...op.localGet(p),
+      ];
+    });
   }
 
   listConcat() {
@@ -904,6 +929,7 @@ class Compiler {
           ...op.localGet(p),
         ];
       }
+      case 'concat': return [...A('lists'), ...op.call(this.concatListsFn())];
       case 'map': {
         const p = ctx.local(I32);
         const out = prune(e.ty).of;
@@ -983,17 +1009,17 @@ class Compiler {
   // 値はどの型でも 8 バイトの欄なので、入れる・写すのは型によらない（i64 のまま運ぶ）。表示と == だけ型ごとに作る
   showDictFn(t, pos) {
     return this.gen(`show ${typeStr(t)}`, [I32], [I32], (local) => {
-      const [n, i, acc] = [local(I32), local(I32), local(I32)];
-      const cat = (code) => [...op.localGet(acc), ...code, ...op.call(this.h.concat), ...op.localSet(acc)];
+      const [n, i, parts] = [local(I32), local(I32), local(I32)];
       return [
-        ...op.i32(this.str('{')), ...op.localSet(acc), ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n),
+        ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n), ...this.newList(n, parts),
         ...forEach(i, n, [
-          ...op.localGet(i), ...op.if(EMPTY), ...cat(op.i32(this.str(', '))), ...op.end,
-          ...cat([...entryAddr(0, i), ...op.i32Load(8), ...op.call(this.quoteFn())]),
-          ...cat(op.i32(this.str(': '))),
-          ...cat(this.showCode(t.of, this.loadAt(t.of, entryAddr(0, i), 16, pos), true, pos)),
+          ...elemAddr(parts, i),
+          ...entryAddr(0, i), ...op.i32Load(8), ...op.call(this.quoteFn()), ...op.i32(this.str(': ')), ...op.call(this.h.concat),
+          ...this.showCode(t.of, this.loadAt(t.of, entryAddr(0, i), 16, pos), true, pos), ...op.call(this.h.concat),
+          ...op.i32Store(8),
         ]),
-        ...cat(op.i32(this.str('}'))), ...op.localGet(acc),
+        ...op.i32(this.str('{')), ...op.localGet(parts), ...op.i32(this.str(', ')), ...op.call(this.joinFn()), ...op.call(this.h.concat),
+        ...op.i32(this.str('}')), ...op.call(this.h.concat),
       ];
     });
   }
@@ -1406,17 +1432,29 @@ class Compiler {
   }
 
   // join(parts, by)。新しい文字を作る（parts が空でも新しい空の文字）
+  // join：長さを先に数え、1回だけ確保して写す（concat をくり返すと、長さの2乗の時間とメモリになる）
   joinFn() {
     return this.gen('join', [I32, I32], [I32], (local) => {
-      const [n, i, acc] = [local(I32), local(I32), local(I32)];
+      const [n, i, total, out, w, part] = [local(I32), local(I32), local(I32), local(I32), local(I32), local(I32)];
+      const put = (strCode) => [
+        ...strCode, ...op.localSet(part),
+        ...op.localGet(w), ...op.localGet(part), ...op.i32(4), ...op.i32Add, ...op.localGet(part), ...op.i32Load(0), ...op.memoryCopy,
+        ...op.localGet(w), ...op.localGet(part), ...op.i32Load(0), ...op.i32Add, ...op.localSet(w),
+      ];
       return [
         ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n),
-        ...op.i32(this.str('')), ...op.i32(this.str('')), ...op.call(this.h.concat), ...op.localSet(acc),
+        ...op.i32(0), ...op.localSet(total),
         ...forEach(i, n, [
-          ...op.localGet(i), ...op.if(EMPTY), ...op.localGet(acc), ...op.localGet(1), ...op.call(this.h.concat), ...op.localSet(acc), ...op.end,
-          ...op.localGet(acc), ...elemAddr(0, i), ...op.i32Load(8), ...op.call(this.h.concat), ...op.localSet(acc),
+          ...op.localGet(i), ...op.if(EMPTY), ...op.localGet(total), ...op.localGet(1), ...op.i32Load(0), ...op.i32Add, ...op.localSet(total), ...op.end,
+          ...op.localGet(total), ...elemAddr(0, i), ...op.i32Load(8), ...op.i32Load(0), ...op.i32Add, ...op.localSet(total),
         ]),
-        ...op.localGet(acc),
+        ...this.newStr(op.localGet(total), out),
+        ...op.localGet(out), ...op.i32(4), ...op.i32Add, ...op.localSet(w),
+        ...forEach(i, n, [
+          ...op.localGet(i), ...op.if(EMPTY), ...put(op.localGet(1)), ...op.end,
+          ...put([...elemAddr(0, i), ...op.i32Load(8)]),
+        ]),
+        ...op.localGet(out),
       ];
     });
   }

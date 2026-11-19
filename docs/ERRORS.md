@@ -56,6 +56,7 @@
 | [R510](#r510) | template holes and values do not match |
 | [R511](#r511) | ensures fails for a generated input |
 | [R512](#r512) | crash on a generated input that satisfies requires |
+| [R513](#r513) | out of memory (compiled program) |
 
 ## E100
 
@@ -655,3 +656,7 @@ end
 
 - message: per_item(total: 0, count: 0) is a valid input (no requires) but fails: R503 division by zero
 - fix: handle this input in per_item (e.g. an if for it), or add a requires that excludes it
+
+## R513
+
+out of memory (compiled program).

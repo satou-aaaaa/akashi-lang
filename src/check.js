@@ -120,6 +120,7 @@ export const BUILTINS = {
   ends_with: () => ({ params: [['text', STR], ['suffix', STR]], ret: BOOL }),
   trim: () => ({ params: [['text', STR]], ret: STR }),
   append: () => { const a = fresh(); return { params: [['list', List(a)], ['item', a]], ret: List(a) }; },
+  concat: () => { const a = fresh(); return { params: [['lists', List(List(a))]], ret: List(a) }; },
   map: () => { const a = fresh(); const b = fresh(); return { params: [['list', List(a)], ['func', Fn([a], b)]], ret: List(b) }; },
   filter: () => { const a = fresh(); return { params: [['list', List(a)], ['func', Fn([a], BOOL)]], ret: List(a) }; },
   fold: () => { const a = fresh(); const b = fresh(); return { params: [['list', List(a)], ['init', b], ['func', Fn([b, a], b)]], ret: b }; },
