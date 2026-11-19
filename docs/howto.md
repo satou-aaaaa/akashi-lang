@@ -79,8 +79,32 @@ end
    node bin/akashi.js run count.ak --allow-read ./mydata
    ```
 
-- パスは、渡したフォルダから見た相対パスで書きます。`..`・絶対パス・外を指すリンクは R507 で止まります。
+- パスは、渡したフォルダから見た相対パスで書きます。`..`・絶対パス・リンク（中を指していても）は R507 で止まります。
 - 鍵を渡さずに動かすと R509 で止まります。
+
+## ファイルに書く
+
+1. `main` に `out: OutFolder` を足します（読む鍵 Folder とは別の鍵です）。
+2. `write_text` は `Result[Unit]` を返すので、`match` で `Ok` と `Err` の両方を書きます。
+
+```akashi
+fn main(console: Console, out: OutFolder) -> Unit
+do
+  match write_text(to: out, path: "report.txt", text: "total: 3\n")
+    case Ok(value: _) then print(to: console, value: "saved")
+    case Err(message: why) then print(to: console, value: "error: " ++ why)
+  end
+end
+```
+
+3. 動かすときに、書いてよいフォルダを1つ渡します。読むフォルダと同じでも別でもかまいません。
+
+   ```bash
+   node bin/akashi.js run save.ak --allow-write ./out
+   ```
+
+- ファイルが無ければ作り、あればまるごと書きかえます。足して書く・消す・フォルダを作ることはできません（要るなら、読んで足して書き直します）。
+- 親のフォルダが無いときは `Err` です。
 
 ## HTML と SQL を安全に作る
 

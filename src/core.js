@@ -66,6 +66,12 @@ export function runSource(src, { out, grants = {} } = {}) {
       }
       args[p.name] = grants.folder;
     }
+    if (p.type.k === 'OutFolder') {
+      if (!grants.outFolder) {
+        return { ok: false, diagnostics: [diag('R509', `main asks for an OutFolder ('${p.name}') but none was granted`, p.pos, 'run with --allow-write <folder> to let this program write files in that folder (and nowhere else)')], output: '' };
+      }
+      args[p.name] = grants.outFolder;
+    }
   }
   let output = '';
   const m = new Machine(a.program, (s) => { output += s; if (out) out(s); });

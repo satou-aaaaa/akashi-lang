@@ -8,13 +8,15 @@ export const UNIT = { k: 'Unit' };
 const ERR = { k: 'Err' };
 export const CONSOLE = { k: 'Console' };
 export const FOLDER = { k: 'Folder' };
+// 書く権利は読む権利と別の鍵（読むだけのプログラムに書く力を持たせない）
+export const OUT_FOLDER = { k: 'OutFolder' };
 export const HTML = { k: 'Html' };
 export const SQL = { k: 'Sql' };
 // 型紙の穴の数（html は {}、sql は ?）
 export const HOLE = { html: '{}', sql: '?' };
 export const countHoles = (template, hole) => template.split(hole).length - 1;
 // 権利（ケーパビリティ）の型。値を作る方法は無く、main が受け取って引数で渡すだけ
-const CAPS = ['Console', 'Folder'];
+const CAPS = ['Console', 'Folder', 'OutFolder'];
 const isCap = (t) => CAPS.includes(prune(t).k);
 const hasCap = (t) => { t = prune(t); return isCap(t) || ((t.k === 'List' || t.k === 'Dict') && hasCap(t.of)) || (t.k === 'Data' && t.args.some(hasCap)); };
 const List = (of) => ({ k: 'List', of });
@@ -79,6 +81,8 @@ export const BUILTINS = {
   print: () => ({ params: [['to', CONSOLE], ['value', fresh()]], ret: UNIT }),
   // 失敗しうる操作は Result を返す。match で Err も書かないと通らない（例外の見落としを無くす）
   read_text: () => ({ params: [['from', FOLDER], ['path', STR]], ret: Result(STR) }),
+  // 書く：まるごと書きかえる。親フォルダが無い・フォルダを指すなら Err（作る・消すことはしない）
+  write_text: () => ({ params: [['to', OUT_FOLDER], ['path', STR], ['text', STR]], ret: Result(UNIT) }),
   parse_int: () => ({ params: [['text', STR]], ret: Option(INT) }),
   lines: () => ({ params: [['text', STR]], ret: List(STR) }),
   html: () => ({ params: [['template', STR], ['values', List(HTML)]], ret: HTML }),
@@ -148,7 +152,7 @@ export function check(program) {
   const types = new Map();
   const variants = new Map();
   for (const ty of [...BUILTIN_TYPES, ...(program.types ?? []).map((x) => ({ ...x, params: [], user: true }))]) {
-    if (types.has(ty.name) || (ty.user && ['Int', 'Bool', 'Str', 'Unit', 'List', 'Dict', 'Html', 'Sql', 'Console', 'Folder'].includes(ty.name))) {
+    if (types.has(ty.name) || (ty.user && ['Int', 'Bool', 'Str', 'Unit', 'List', 'Dict', 'Html', 'Sql', 'Console', 'Folder', 'OutFolder'].includes(ty.name))) {
       err('E203', `type '${ty.name}' is already defined`, ty.pos, 'give the type a different name');
       continue;
     }
@@ -483,7 +487,7 @@ export function check(program) {
     if (f.name === 'main') {
       const kinds = f.params.map((p) => fromAst(p.type).k);
       if (f.ret.k !== 'Unit' || f.params.some((p) => !isCap(fromAst(p.type))) || new Set(kinds).size !== kinds.length) {
-        err('E303', 'main may only take capabilities (each type once) and must return Unit', f.pos, 'write fn main(console: Console) -> Unit do ... end; add folder: Folder only if the program reads files');
+        err('E303', 'main may only take capabilities (each type once) and must return Unit', f.pos, 'write fn main(console: Console) -> Unit do ... end; add folder: Folder only if the program reads files, out: OutFolder only if it writes files');
       }
     }
 

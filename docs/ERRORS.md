@@ -347,7 +347,7 @@ fn main(console: Console, n: Int) -> Unit do print(to: console, value: n) end
 ```
 
 - message: main may only take capabilities (each type once) and must return Unit
-- fix: write fn main(console: Console) -> Unit do ... end; add folder: Folder only if the program reads files
+- fix: write fn main(console: Console) -> Unit do ... end; add folder: Folder only if the program reads files, out: OutFolder only if it writes files
 
 ## E304
 

@@ -120,6 +120,7 @@ export class Machine {
         return { sql: a.template, params: [...a.values] };
       }
       case 'read_text': return this.readText(a.from, a.path, pos);
+      case 'write_text': return this.writeText(a.to, a.path, a.text, pos);
       case 'parse_int': {
         const t = a.text.trim();
         if (!/^-?[0-9]+$/.test(t) || !Number.isSafeInteger(Number(t))) return NONE;
@@ -221,12 +222,25 @@ export class Machine {
   }
 
   // 読めないとき（無い・フォルダ・文字が読めない）は Err を返す。フォルダの外を指すのは書き方の誤りなので止める（R507）
-  // Folder の権利で読めるのは、渡されたフォルダの中だけ（.. や絶対パス、外を指すリンクは止める）
-  readText(folder, path, pos) {
+  // Folder の権利で読めるのは、渡されたフォルダの中だけ（.. や絶対パスは止める。リンクは中を指していてもたどらない）
+  checkPath(path, pos) {
     const bad = path === '' || path.startsWith('/') || /^[A-Za-z]:/.test(path) || path.includes('\\') || path.includes('\0') || path.split('/').some((x) => x === '..');
     if (bad) this.fail('R507', `path '${path}' is not inside the folder`, pos, 'use a relative path without .. such as "data/input.txt"');
+  }
+
+  // 書くのは、渡された OutFolder の中だけ。読むときと同じパスの決まり（リンクはたどらない）に加え、ただのファイルのパスであること
+  writeText(out, path, text, pos) {
+    this.checkPath(path, pos);
+    if (path.endsWith('/') || path.split('/').some((x) => x === '' || x === '.')) this.fail('R507', `path '${path}' must be a plain file path`, pos, 'write it like "out/result.txt" (no empty parts, no ".", no / at the end)');
+    const r = out.write(path, text); // { ok } か { missing } か { escape }
+    if (r.escape) this.fail('R507', `path '${path}' goes through a link`, pos, 'links are never followed; write to the real file or folder path inside the folder');
+    return r.ok ? { tag: 'Ok', fields: { value: null } } : err(r.missing);
+  }
+
+  readText(folder, path, pos) {
+    this.checkPath(path, pos);
     const r = folder.read(path); // { text } か { missing } か { escape }
-    if (r.escape) this.fail('R507', `path '${path}' points outside the folder (through a link)`, pos, 'read only files that are really inside the folder');
+    if (r.escape) this.fail('R507', `path '${path}' goes through a link`, pos, 'links are never followed; read the real file path inside the folder');
     return r.text !== undefined ? { tag: 'Ok', fields: { value: r.text } } : err(r.missing);
   }
 
