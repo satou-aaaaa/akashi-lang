@@ -1,7 +1,7 @@
 // 書式を整える（akashi fmt）。書き方の揺れを無くし、AI と人が同じ形で読めるようにする。
 // やること：字下げを2つずつにそろえる・語のあいだの空白をそろえる・行末の空白と続く空行を消す・コメントは残す。
 // 行の分け方は変えない（どこで改行するかは書いた人に任せる）。意味は変えない（test/fmt.test.js が、整える前と後で構文の木が同じかを確かめる）。
-import { lex, parse } from './parse.js';
+import { lex, parse, TYPE_NAMES } from './parse.js';
 
 const OPENERS = new Set(['do', 'if', 'when', 'match', 'type']);
 
@@ -34,7 +34,9 @@ function joinLine(toks, src) {
 // 整えた文を返す。構文が通らないものは整えない（{ ok: false, error }）
 export function format(src) {
   try {
-    parse(src);
+    // 構文だけを確かめる。use で読むほかのファイルの型も知らないので、大文字で始まる名前は型として通す
+    const names = lex(src).filter((t) => t.t === 'id' && /^[A-Z]/.test(t.v) && !TYPE_NAMES.includes(t.v)).map((t) => t.v);
+    parse(src, { otherTypes: names });
   } catch (e) {
     if (e.diag) return { ok: false, error: e.diag };
     throw e;

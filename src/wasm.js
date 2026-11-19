@@ -78,7 +78,7 @@ const LIST_BUILTINS = ['len', 'get', 'at', 'range', 'append', 'map', 'filter', '
 const TEXT_BUILTINS = ['chars', 'split', 'join', 'contains', 'starts_with', 'ends_with', 'lines', 'html', 'html_text', 'html_join', 'sql'];
 const DICT_BUILTINS = ['dict', 'dict_put', 'dict_get', 'dict_has', 'dict_remove', 'dict_keys', 'dict_values', 'dict_size'];
 const CAPS = ['Console', 'Folder', 'OutFolder']; // 鍵。実行時には何も渡さない（Folder・OutFolder は WASI の「read」「write」という名前の preopen）
-const SUPPORTED_BUILTINS = ['print', 'to_str', 'str_len', 'parse_int', 'trim', 'read_text', 'write_text', 'slice', 'code_of', 'char_of', ...LIST_BUILTINS, ...TEXT_BUILTINS, ...DICT_BUILTINS];
+const SUPPORTED_BUILTINS = ['print', 'to_str', 'str_len', 'parse_int', 'trim', 'read_text', 'write_text', 'write_bytes', 'slice', 'code_of', 'char_of', ...LIST_BUILTINS, ...TEXT_BUILTINS, ...DICT_BUILTINS];
 
 function valType(t) {
   t = prune(t);
@@ -583,10 +583,22 @@ class Compiler {
           ...op.localGet(c), ...op.call(this.charOfFn()),
         ];
       }
-      case 'write_text': {
+      case 'write_text': case 'write_bytes': {
         const r = ctx.local(I32);
+        // write_bytes：Int のリストを、Str と同じ形（長さ＋バイト）にしてから書く。0〜255 でなければ R506
+        const [L, n, i, buf, b] = [ctx.local(I32), ctx.local(I32), ctx.local(I32), ctx.local(I32), ctx.local(I64)];
+        const data = e.name === 'write_text' ? A('text') : [
+          ...A('bytes'), ...op.localTee(L), ...op.i32Load(0), ...op.localSet(n),
+          ...op.localGet(n), ...op.i32(4), ...op.i32Add, ...op.call(this.h.alloc), ...op.localTee(buf), ...op.localGet(n), ...op.i32Store(0),
+          ...forEach(i, n, [
+            ...elemAddr(L, i), ...op.i64Load(8), ...op.localTee(b), ...op.i64(0), ...op.i64LtS, ...op.localGet(b), ...op.i64(255), ...op.i64GtS, ...op.i32Or,
+            ...op.if(EMPTY), ...this.failAt('R506', 'a byte is not between 0 and 255', e.pos), ...op.end,
+            ...op.localGet(buf), ...op.localGet(i), ...op.i32Add, ...op.localGet(b), ...op.i32WrapI64, ...op.i32Store8(4),
+          ]),
+          ...op.localGet(buf),
+        ];
         return [
-          ...A('path'), ...A('text'), ...op.call(this.writeTextFn()), ...op.localTee(r), ...op.i32Eqz,
+          ...A('path'), ...data, ...op.call(this.writeTextFn()), ...op.localTee(r), ...op.i32Eqz,
           ...op.if(EMPTY), ...this.failAt('R507', 'the path is not a plain file path inside the folder', e.pos), ...op.end,
           ...op.localGet(r), ...op.i32(1), ...op.i32Eq,
           ...op.if(EMPTY), ...this.failAt('R507', 'the path goes through a link', e.pos), ...op.end,

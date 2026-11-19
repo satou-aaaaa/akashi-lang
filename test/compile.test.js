@@ -307,6 +307,28 @@ end`;
   assert.equal(viaInterpreter(prog('a.txt')).code, 'R509');
 });
 
+test('write_bytes writes exactly the bytes, and stops on a byte outside 0..255 before touching the file', () => {
+  const base = mkdtempSync(join(tmpdir(), 'akashi-wb-'));
+  const prog = (path, bytes) => `fn main(console: Console, out: OutFolder) -> Unit do
+  print(to: console, value: write_bytes(to: out, path: "${path}", bytes: ${bytes}))
+end`;
+  const cases = [['a.bin', '[0, 97, 255, 10, 128]'], ['a.bin', '[]'], ['a.bin', 'range(from: 0, to: 256)'], ['a.bin', '[1, 256]'], ['a.bin', '[-1]'], ['../x.bin', '[1]'], ['../x.bin', '[300]'], ['nope/a.bin', '[1]']];
+  cases.forEach(([p, bytes], k) => {
+    const a = join(base, `i${k}`);
+    const b = join(base, `w${k}`);
+    mkdirSync(a);
+    mkdirSync(b);
+    const i = viaInterpreter(prog(p, bytes), undefined, a);
+    const w = viaWasm(prog(p, bytes), undefined, b);
+    assert.deepEqual({ out: w.out, exit: w.exit, code: w.code }, i, `${p} ${bytes}\n${w.err}`);
+    assert.deepEqual(tree(b), tree(a), `${p} ${bytes}`);
+  });
+  const c = join(base, 'check');
+  mkdirSync(c);
+  viaWasm(prog('a.bin', '[0, 97, 255, 10, 128]'), undefined, c);
+  assert.deepEqual([...readFileSync(join(c, 'a.bin'))], [0, 97, 255, 10, 128]);
+});
+
 test('a program can read one folder and write another, and the names decide which is which', () => {
   const root = mkdtempSync(join(tmpdir(), 'akashi-rw-'));
   mkdirSync(join(root, 'in'));

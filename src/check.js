@@ -83,6 +83,8 @@ export const BUILTINS = {
   read_text: () => ({ params: [['from', FOLDER], ['path', STR]], ret: Result(STR) }),
   // 書く：まるごと書きかえる。親フォルダが無い・フォルダを指すなら Err（作る・消すことはしない）
   write_text: () => ({ params: [['to', OUT_FOLDER], ['path', STR], ['text', STR]], ret: Result(UNIT) }),
+  // バイトの並びを書く（.wasm など文字でないファイル）。どれも 0〜255 でないと R506
+  write_bytes: () => ({ params: [['to', OUT_FOLDER], ['path', STR], ['bytes', List(INT)]], ret: Result(UNIT) }),
   parse_int: () => ({ params: [['text', STR]], ret: Option(INT) }),
   lines: () => ({ params: [['text', STR]], ret: List(STR) }),
   html: () => ({ params: [['template', STR], ['values', List(HTML)]], ret: HTML }),

@@ -164,7 +164,7 @@ end
 | --- | --- | --- |
 | `Console` | `print(to: console, value: x)` | いつも |
 | `Folder` | `read_text(from: folder, path: "a.txt")`。読むだけ。渡したフォルダの中だけ。リンクはたどらない | `--allow-read <フォルダ>` を付けて動かしたときだけ |
-| `OutFolder` | `write_text(to: out, path: "a.txt", text: s)`。ファイルを作るか、まるごと書きかえる。渡したフォルダの中だけ。フォルダは作らず、消さない。リンクはたどらない | `--allow-write <フォルダ>` を付けて動かしたときだけ |
+| `OutFolder` | `write_text(to: out, path: "a.txt", text: s)`・`write_bytes(to: out, path: "a.bin", bytes: xs)`。ファイルを作るか、まるごと書きかえる。渡したフォルダの中だけ。フォルダは作らず、消さない。リンクはたどらない | `--allow-write <フォルダ>` を付けて動かしたときだけ |
 
 - 鍵を受け取れるのは `main` だけです。ほかの関数には引数で渡します。
 - 鍵を持たない関数で鍵の要る関数を呼ぶと E300 です。直し方に、引数の足し方が出ます。
@@ -189,6 +189,7 @@ end
 | `print(to: console, value: x)` | 何でも → Unit。画面に1行出す（鍵 Console が要る） |
 | `read_text(from: folder, path: p)` | Result[Str]。無い・フォルダ・UTF-8 でないときは Err（鍵 Folder が要る） |
 | `write_text(to: out, path: p, text: s)` | Result[Unit]。親フォルダが無い・フォルダを指すときは Err（鍵 OutFolder が要る）。空の段・`.` の段は R507 |
+| `write_bytes(to: out, path: p, bytes: xs)` | Result[Unit]。バイトの並び（List[Int]、どれも 0〜255。ほかは R506）をそのまま書く。`.wasm` など文字でないファイル用。決まりは write_text と同じ |
 | `lines(text: s)` | List[Str]。行に分ける（`\r\n` も可、最後の改行は数えない） |
 | `parse_int(text: s)` | Option[Int]。前後の空白は無視。整数でなければ None |
 | `len(list: xs)` | Int |

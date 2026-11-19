@@ -3,13 +3,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { format } from '../src/fmt.js';
-import { parse } from '../src/parse.js';
+import { parse, lex, TYPE_NAMES } from '../src/parse.js';
 
 const root = new URL('../', import.meta.url);
-const tree = (src) => JSON.stringify(parse(src), (k, v) => (k === 'pos' || k === 'vpos' || k === 'src' ? undefined : v));
+// use で読む型も通すため、大文字で始まる名前は型として読む（src/fmt.js と同じ）
+const types = (src) => lex(src).filter((t) => t.t === 'id' && /^[A-Z]/.test(t.v) && !TYPE_NAMES.includes(t.v)).map((t) => t.v);
+const tree = (src) => JSON.stringify(parse(src, { otherTypes: types(src) }), (k, v) => (k === 'pos' || k === 'vpos' || k === 'src' ? undefined : v));
 
-const files = ['examples/', 'examples/bad/', 'test/compile/'].flatMap((d) =>
-  readdirSync(new URL(d, root)).filter((f) => f.endsWith('.ak')).map((f) => d + f));
+// フォルダの中も全部（examples/lib・compiler など。見落としを無くすため、決まった一覧にしない）
+const walk = (d) => readdirSync(new URL(d, root), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'node_modules' || e.name.startsWith('.') ? [] : walk(`${d}${e.name}/`)) : e.name.endsWith('.ak') ? [d + e.name] : []));
+const files = walk('');
 const docBlocks = ['README.md', ...readdirSync(new URL('docs/', root)).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)]
   .flatMap((f) => [...readFileSync(new URL(f, root), 'utf8').matchAll(/^```akashi\n([\s\S]*?)^```$/gm)].map((m, i) => [`${f} block ${i + 1}`, m[1]]));
 

@@ -25,7 +25,9 @@ export function lex(src, file) {
   let col = 1;
   const adv = (n = 1) => {
     for (let k = 0; k < n; k++) {
-      if (src[i] === '\n') { line++; col = 1; } else col++;
+      // 列は文字（コードポイント）で数える：サロゲートの後ろ半分では進めない（compiler/lexer.ak と同じ）
+      const u = src.charCodeAt(i);
+      if (src[i] === '\n') { line++; col = 1; } else if (!(u >= 0xdc00 && u <= 0xdfff)) col++;
       i++;
     }
   };
@@ -64,7 +66,7 @@ export function lex(src, file) {
         if (src[j] === '\\') {
           const e = src[j + 1];
           const map = { n: '\n', t: '\t', '"': '"', '\\': '\\' };
-          if (!(e in map)) fail('E100', `unknown escape '\\${e ?? ''}'`, { line, col: col + (j - i), offset: j }, 'only \\n \\t \\" \\\\ are allowed');
+          if (!(e in map)) fail('E100', `unknown escape '\\${e ?? ''}'`, { line, col: col + [...src.slice(i, j)].length, offset: j }, 'only \\n \\t \\" \\\\ are allowed');
           s += map[e];
           j += 2;
         } else {
@@ -89,7 +91,8 @@ export function lex(src, file) {
       continue;
     }
     const hint = { '{': 'blocks use do ... end, not { }', '}': 'blocks use do ... end, not { }', ';': 'statements are separated by new lines; remove the ;', '&': 'use and', '|': 'use or', '!': 'use not (or != for "not equal")', '.': 'there are no methods; call functions with named arguments, e.g. len(list: xs)', "'": 'strings use double quotes "..."' };
-    fail('E100', `unexpected character '${c}'`, pos, hint[c] ?? 'remove this character');
+    // 絵文字などは文字（コードポイント）まるごと見せる（UTF-16 の半分を出さない）
+    fail('E100', `unexpected character '${String.fromCodePoint(src.codePointAt(i))}'`, pos, hint[c] ?? 'remove this character');
   }
   toks.push({ t: 'eof', pos: file ? { line, col, offset: i, file } : { line, col, offset: i }, end: i });
   return toks;
