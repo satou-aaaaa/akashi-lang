@@ -33,6 +33,7 @@ Python・JavaScript・Java・C/C++・Go・Rust などでよく問題になるこ
 | データの取り合い（並行の競合） | Go・Java・C++ | Go の実プロジェクトの並行バグ 171 件のうち、半分は止まる系（デッドロックなど）、半分は取り合い系。チャネルでも 58% の止まる系バグが起きていた [8] | **値を書きかえない・並行に動かさない**。名前は1回だけ決め、リストも新しいものを作る。取り合いが起きる場所が無い |
 | 注入（SQL・HTML・eval） | どの言語でも（文字列をつないで作るとき） | CWE Top 25（2025）の1位 XSS・2位 SQL 注入・10位 コード注入 [9] | `Html`・`Sql` は**書いたままの型紙＋値**でしか作れない（E310・E311）。文字からコードを動かす `eval` は無い。くわしくは [安全の仕組み](security.md) |
 | どこからでも外に触れる権利 | ほとんどの言語（どの関数もファイルや通信を使える） | 依存した部品が乗っ取られると、その部品も全部の権利を持つ。CWE Top 25 の「認可の抜け」「パスの乗っ取り」 [9][10] | 外に触る権利は**鍵（Console・Folder）を引数で渡したときだけ**。鍵は main だけが受け取り、作れない・しまえない（E300・E309）。ファイルは渡したフォルダの中だけ（R507） |
+| リンクで決めた場所の外へ出る | どの言語でも（ファイルを開く関数がリンクをたどる）。WASI の実装にも、外へたどれるものがある | Node の node:wasi は「ファイルの sandbox を備えず、抜けられる」と公式に書いている [27]。Akashi でも v0.12 まで、node:wasi の上では段の途中のリンクで外を読めた | リンクは中を指していてもたどらない（R507）。読む鍵 Folder と書く鍵 OutFolder を分ける。コンパイルしたプログラムは、実行する側の sandbox に頼らず、開ける前に段ごとにリンクを調べる |
 | 浮動小数点の誤差 | ほぼ全部（`0.1 + 0.2 != 0.3`） | 2進の小数は 0.1 を正確に表せない [11] | 小数は**まだ無い**（E101）。お金などは「円」「銭」の整数で書く。入れるなら2進でなく10進の小数にする（下の「入れなかった」） |
 | 文字の長さの数え違い | JavaScript・Java（UTF-16 の単位で数える） | 絵文字などは `length` が 2 になる [12] | `str_len`・`chars`・`slice`・`code_of` は、どれも文字（コードポイント）で数える。バイトや UTF-16 の位置は表に出さないので、絵文字の途中で切ることが無い。範囲の外は黙って縮めずに R506 で止める |
 | 辞書の回る順のぶれ | Go（map）・Python 3.6 より前の dict | Go の仕様は「map を回る順は決めず、回すたびに同じとも限らない」とする [26]。出力やテストが実行ごとに変わる | `Dict` の鍵は Str だけ。いつも鍵の順（コードポイント順）に並ぶので、`dict_keys`・表示・`==` は毎回同じ。同じ鍵を2回渡す `dict` は黙って上書きせず R506 |
@@ -161,3 +162,4 @@ Python・JavaScript・Java・C/C++・Go・Rust などでよく問題になるこ
 24. Yi Wei, Carlo A. Furia, Bertrand Meyer ほか, "The Search for the Laws of Automatic Random Testing". https://arxiv.org/abs/1211.3257
 25. Diátaxis（Daniele Procida）. https://diataxis.fr/ ／ Canonical での採用：https://ubuntu.com/blog/diataxis-a-new-foundation-for-canonical-documentation
 26. The Go Programming Language Specification, "For statements with range clause". https://go.dev/ref/spec#For_range
+27. Node.js v22 documentation, "WASI" (Security). https://nodejs.org/docs/latest-v22.x/api/wasi.html

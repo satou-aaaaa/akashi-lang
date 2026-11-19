@@ -27,7 +27,7 @@ do
 end
 ```
 
-- `main` is `fn main(console: Console) -> Unit do ... end`. Add `folder: Folder` only if the program reads files. It needs no ensures or example.
+- `main` is `fn main(console: Console) -> Unit do ... end`. Add `folder: Folder` only if the program reads files, and `out: OutFolder` only if it writes files. It needs no ensures or example.
 - A function that takes a capability parameter needs no ensures or example. All other functions are pure.
 - Clauses come after `-> Type` and before `do`, in any order.
 
@@ -36,7 +36,8 @@ end
 | type | lets you | given by |
 | --- | --- | --- |
 | `Console` | `print(to: console, value: x)` | always |
-| `Folder` | `read_text(from: folder, path: "a.txt")` → `Result[Str]`, read-only, only files inside that folder (no `..`, no absolute paths, no links out) | only when run with `--allow-read <folder>` |
+| `Folder` | `read_text(from: folder, path: "a.txt")` → `Result[Str]`, read-only, only files inside that folder (no `..`, no absolute paths, links are never followed) | only when run with `--allow-read <folder>` |
+| `OutFolder` | `write_text(to: out, path: "a.txt", text: s)` → `Result[Unit]`, creates or replaces one file inside that folder (never creates folders, never deletes, links are never followed) | only when run with `--allow-write <folder>` |
 
 - Pass a capability down as an argument: `report(console: console, total: t)`.
 - A capability can only be a parameter: it cannot be stored in `let`, returned, put in a list, or compared (E309).
@@ -146,6 +147,7 @@ end
 | --- | --- |
 | `print(to: console, value: x)` | any → Unit (needs a Console) |
 | `read_text(from: folder, path: p)` | Result[Str] (needs a Folder); a missing file is `Err` |
+| `write_text(to: out, path: p, text: s)` | Result[Unit] (needs an OutFolder); a missing parent folder is `Err` |
 | `parse_int(text: s)` | Option[Int]; `None` unless s is a whole number (spaces around are ok) |
 | `lines(text: s)` | List[Str], split at line ends |
 | `html(template: "...", values: [...])` | Html (values: List[Html]) |

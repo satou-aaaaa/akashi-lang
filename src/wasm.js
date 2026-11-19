@@ -77,8 +77,8 @@ class Unsupported extends Error {
 const LIST_BUILTINS = ['len', 'get', 'at', 'range', 'append', 'map', 'filter', 'fold', 'find', 'any', 'all', 'reverse', 'take', 'drop', 'sort', 'sum', 'max', 'min'];
 const TEXT_BUILTINS = ['chars', 'split', 'join', 'contains', 'starts_with', 'ends_with', 'lines', 'html', 'html_text', 'html_join', 'sql'];
 const DICT_BUILTINS = ['dict', 'dict_put', 'dict_get', 'dict_has', 'dict_remove', 'dict_keys', 'dict_values', 'dict_size'];
-const CAPS = ['Console', 'Folder']; // 鍵。実行時には何も渡さない（Folder は WASI の fd 3）
-const SUPPORTED_BUILTINS = ['print', 'to_str', 'str_len', 'parse_int', 'trim', 'read_text', 'slice', 'code_of', 'char_of', ...LIST_BUILTINS, ...TEXT_BUILTINS, ...DICT_BUILTINS];
+const CAPS = ['Console', 'Folder', 'OutFolder']; // 鍵。実行時には何も渡さない（Folder・OutFolder は WASI の「read」「write」という名前の preopen）
+const SUPPORTED_BUILTINS = ['print', 'to_str', 'str_len', 'parse_int', 'trim', 'read_text', 'write_text', 'slice', 'code_of', 'char_of', ...LIST_BUILTINS, ...TEXT_BUILTINS, ...DICT_BUILTINS];
 
 function valType(t) {
   t = prune(t);
@@ -152,6 +152,7 @@ class Compiler {
     if (!main) throw new Unsupported('a program without main', { line: 1, col: 1 });
     for (const prm of main.params) if (!CAPS.includes(prm.type.k)) throw new Unsupported(`the parameter ${prm.name} of main`, prm.pos);
     const folder = main.params.find((x) => x.type.k === 'Folder');
+    const outFolder = main.params.find((x) => x.type.k === 'OutFolder');
 
     // 関数の番号：0..1 は取り込み、続いて手伝いの関数、続いて利用者の関数、最後に _start
     this.types = [];
@@ -166,15 +167,17 @@ class Compiler {
       { mod: 'wasi_snapshot_preview1', name: 'proc_exit', type: typeIndex([I32], []) },
     ];
     const IMP = { fdWrite: 0, procExit: 1 };
-    // ファイルを読むのは、main が Folder を受け取るときだけ。そのときも、読むための5つだけを取り込む
-    if (folder) {
-      for (const [key, nm, params] of [
-        ['prestat', 'fd_prestat_get', [I32, I32]],
-        ['pathOpen', 'path_open', [I32, I32, I32, I32, I32, I64, I64, I32, I32]],
-        ['fdFilestat', 'fd_filestat_get', [I32, I32]],
-        ['fdRead', 'fd_read', [I32, I32, I32, I32]],
-        ['fdClose', 'fd_close', [I32]],
-      ]) {
+    // ファイルに触るのは、main が Folder（読む）か OutFolder（書く）を受け取るときだけ。そのときも要るものだけを取り込む
+    const fileImports = [
+      ['prestat', 'fd_prestat_get', [I32, I32]],
+      ['prestatName', 'fd_prestat_dir_name', [I32, I32, I32]],
+      ['pathFilestat', 'path_filestat_get', [I32, I32, I32, I32, I32]],
+      ['pathOpen', 'path_open', [I32, I32, I32, I32, I32, I64, I64, I32, I32]],
+      ...(folder ? [['fdFilestat', 'fd_filestat_get', [I32, I32]], ['fdRead', 'fd_read', [I32, I32, I32, I32]]] : []),
+      ['fdClose', 'fd_close', [I32]],
+    ];
+    if (folder || outFolder) {
+      for (const [key, nm, params] of fileImports) {
         IMP[key] = imports.length;
         imports.push({ mod: 'wasi_snapshot_preview1', name: nm, type: typeIndex(params, [I32]) });
       }
@@ -186,17 +189,19 @@ class Compiler {
     this.fnIndex = new Map(p.fns.map((f, i) => [f.name, userBase + i]));
     const startIndex = userBase + p.fns.length;
     this.genBase = startIndex + 1;
-    const G = { heap: 0, depth: 1 };
+    const G = { heap: 0, depth: 1, readFd: 2, writeFd: 3 };
     this.G = G;
 
     // 利用者の関数を先に作る（文字の定数を集めて、ヒープの始まりを決めるため）
     const userFns = p.fns.map((f) => this.fn(f));
     const helpers = this.helpers(IMP, G);
-    // 始めに、フォルダ（fd 3）が渡されているかを確かめる。無ければインタプリタと同じく R509
-    const grant = folder
-      ? [...op.i32(3), ...op.i32(SCRATCH), ...op.call(IMP.prestat), ...op.if(EMPTY), ...this.failAt('R509', `main asks for a Folder ('${folder.name}') but none was granted`, folder.pos), ...op.end]
-      : [];
-    const start = { type: typeIndex([], []), locals: [], body: [...grant, ...op.call(this.fnIndex.get('main')), ...op.end] };
+    // 始めに、渡されたフォルダを名前で探す（fd 3 から順に。読むのは「read」、書くのは「write」という名前のもの）。
+    // 要るのに無ければ、インタプリタと同じく R509
+    const grant = folder || outFolder ? [...this.findPreopens(IMP, G),
+      ...(folder ? [...op.globalGet(G.readFd), ...op.i32(0), ...op.i32LtS, ...op.if(EMPTY), ...this.failAt('R509', `main asks for a Folder ('${folder.name}') but none was granted`, folder.pos), ...op.end] : []),
+      ...(outFolder ? [...op.globalGet(G.writeFd), ...op.i32(0), ...op.i32LtS, ...op.if(EMPTY), ...this.failAt('R509', `main asks for an OutFolder ('${outFolder.name}') but none was granted`, outFolder.pos), ...op.end] : []),
+    ] : [];
+    const start = { type: typeIndex([], []), locals: this.startLocals ?? [], body: [...grant, ...op.call(this.fnIndex.get('main')), ...op.end] };
 
     const funcs = [
       ...helpers.map((x) => ({ ...x, type: typeIndex(x.params, x.results) })),
@@ -226,6 +231,8 @@ class Compiler {
       ...section(6, vec([
         [I32, 0x01, ...op.i32(heapStart), ...op.end], // ヒープの次の空き
         [I32, 0x01, ...op.i32(0), ...op.end], // 呼び出しの深さ
+        [I32, 0x01, ...op.i32(-1), ...op.end], // 読むフォルダの fd（無ければ -1）
+        [I32, 0x01, ...op.i32(-1), ...op.end], // 書くフォルダの fd（無ければ -1）
       ])),
       ...section(7, vec([
         [...name('memory'), 0x02, ...uleb(0)],
@@ -576,13 +583,23 @@ class Compiler {
           ...op.localGet(c), ...op.call(this.charOfFn()),
         ];
       }
+      case 'write_text': {
+        const r = ctx.local(I32);
+        return [
+          ...A('path'), ...A('text'), ...op.call(this.writeTextFn()), ...op.localTee(r), ...op.i32Eqz,
+          ...op.if(EMPTY), ...this.failAt('R507', 'the path is not a plain file path inside the folder', e.pos), ...op.end,
+          ...op.localGet(r), ...op.i32(1), ...op.i32Eq,
+          ...op.if(EMPTY), ...this.failAt('R507', 'the path goes through a link', e.pos), ...op.end,
+          ...op.localGet(r),
+        ];
+      }
       case 'read_text': {
         const r = ctx.local(I32);
         return [
           ...A('path'), ...op.call(this.readTextFn()), ...op.localTee(r), ...op.i32Eqz,
           ...op.if(EMPTY), ...this.failAt('R507', 'the path is not inside the folder', e.pos), ...op.end,
           ...op.localGet(r), ...op.i32(1), ...op.i32Eq,
-          ...op.if(EMPTY), ...this.failAt('R507', 'the path points outside the folder (through a link)', e.pos), ...op.end,
+          ...op.if(EMPTY), ...this.failAt('R507', 'the path goes through a link', e.pos), ...op.end,
           ...op.localGet(r),
         ];
       }
@@ -1510,22 +1527,15 @@ class Compiler {
   }
   // ---- ファイルを読む（Folder。WASI の fd 3 が、渡されたフォルダ） ----
   // read_text の本体。返すのは Result[Str] の場所。ただし 0 は「パスがフォルダの中を指していない」、1 は「リンクで外を指す」（呼ぶ側が R507 で止める）
-  readTextFn() {
-    const utf8ok = this.utf8OkFn();
-    const slice = this.sliceFn();
-    const rt = { k: 'Data', name: 'Result', args: [{ k: 'Str' }] };
-    return this.gen('read_text', [I32], [I32], (local) => {
-      const [n, i, seg, b, e, fd, buf, cap, total, nr, tmp] = [local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32)];
-      const ctx = { local: () => tmp };
+  // パスの確かめ（インタプリタの checkPath と同じ）：空・/ で始まる・C: で始まる・\ か \0 を含む・.. の段があれば 0。
+  // strict（書くとき）は、空の段（a//b や最後の /）と . の段も 0
+  pathOkFn() {
+    return this.gen('path ok', [I32, I32], [I32], (local) => {
+      const [n, i, seg, b, len] = [local(I32), local(I32), local(I32), local(I32), local(I32)];
       const byte = (at) => [...op.localGet(0), ...at, ...op.i32Add, ...op.i32Load8u(4)];
-      const err = (suffix) => [
-        ...this.mkData(rt, 'Err', [[...op.i32(this.str("'")), ...op.localGet(0), ...op.call(this.h.concat), ...op.i32(this.str(`' ${suffix}`)), ...op.call(this.h.concat)]], ctx, null),
-        ...op.return,
-      ];
       const ret0 = [...op.i32(0), ...op.return];
       return [
         ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n),
-        // インタプリタと同じ確かめ：空・/ で始まる・C: で始まる・\ か \0 を含む・.. の段がある
         ...op.localGet(n), ...op.i32Eqz, ...op.if(EMPTY), ...ret0, ...op.end,
         ...byte(op.i32(0)), ...op.i32(47), ...op.i32Eq, ...op.if(EMPTY), ...ret0, ...op.end,
         ...op.localGet(n), ...op.i32(2), ...op.i32GeU, ...op.if(EMPTY),
@@ -1541,18 +1551,141 @@ class Compiler {
         ...op.localGet(b), ...op.i32(47), ...op.i32Eq,
         ...op.end,
         ...op.if(EMPTY),
-        ...op.localGet(i), ...op.localGet(seg), ...op.i32Sub, ...op.i32(2), ...op.i32Eq,
+        ...op.localGet(i), ...op.localGet(seg), ...op.i32Sub, ...op.localTee(len), ...op.i32(2), ...op.i32Eq,
         ...op.if(EMPTY),
         ...byte(op.localGet(seg)), ...op.i32(46), ...op.i32Eq, ...byte([...op.localGet(seg), ...op.i32(1), ...op.i32Add]), ...op.i32(46), ...op.i32Eq, ...op.i32And,
         ...op.if(EMPTY), ...ret0, ...op.end,
+        ...op.end,
+        ...op.localGet(1), ...op.if(EMPTY),
+        ...op.localGet(len), ...op.i32Eqz, ...op.if(EMPTY), ...ret0, ...op.end,
+        ...op.localGet(len), ...op.i32(1), ...op.i32Eq, ...op.if(EMPTY), ...byte(op.localGet(seg)), ...op.i32(46), ...op.i32Eq, ...op.if(EMPTY), ...ret0, ...op.end, ...op.end,
         ...op.end,
         ...op.localGet(i), ...op.i32(1), ...op.i32Add, ...op.localSet(seg),
         ...op.end,
         ...op.localGet(i), ...op.localGet(n), ...op.i32GeU, ...op.brIf(1),
         ...op.localGet(i), ...op.i32(1), ...op.i32Add, ...op.localSet(i), ...op.br(0),
         ...op.end, ...op.end,
-        // 開ける：読む権利（fd_read と fd_filestat_get）だけを頼む（書く・作る権利は頼まない）。リンクはたどり、外を指していれば受け皿が断る
-        ...op.i32(3), ...op.i32(1), ...op.localGet(0), ...op.i32(4), ...op.i32Add, ...op.localGet(n), ...op.i32(0), ...op.i64(2 + 2097152), ...op.i64(0), ...op.i32(0), ...op.i32(SCRATCH),
+        ...op.i32(1),
+      ];
+    });
+  }
+
+  // パスの段を前から1つずつ、リンクをたどらずに調べ、リンクがあれば 1（無い段に来たらそこで 0）。
+  // 受け皿（WASI の実装）の sandbox だけに頼らない：node:wasi は中のリンクを外までたどることがある
+  linkOnTheWayFn() {
+    return this.gen('link on the way', [I32, I32], [I32], (local) => {
+      const [n, i, buf] = [local(I32), local(I32), local(I32)];
+      const stat = (len) => [
+        ...op.localGet(0), ...op.i32(0), ...op.localGet(1), ...op.i32(4), ...op.i32Add, ...len, ...op.localGet(buf), ...op.call(this.imp.pathFilestat),
+        ...op.if(EMPTY), ...op.i32(0), ...op.return, ...op.end,
+        ...op.localGet(buf), ...op.i32Load8u(16), ...op.i32(7), ...op.i32Eq, ...op.if(EMPTY), ...op.i32(1), ...op.return, ...op.end,
+      ];
+      return [
+        ...op.i32(64), ...op.call(this.h.alloc), ...op.localSet(buf),
+        ...op.localGet(1), ...op.i32Load(0), ...op.localSet(n),
+        ...forEach(i, n, [
+          ...op.localGet(1), ...op.localGet(i), ...op.i32Add, ...op.i32Load8u(4), ...op.i32(47), ...op.i32Eq,
+          ...op.if(EMPTY), ...stat(op.localGet(i)), ...op.end,
+        ]),
+        ...stat(op.localGet(n)),
+        ...op.i32(0),
+      ];
+    });
+  }
+
+  // 渡されたフォルダを名前で探す：fd 3 から、fd_prestat_get が断るまで。名前が「read」なら読む、「write」なら書くフォルダ
+  findPreopens(IMP, G) {
+    const fd = 0; // _start には局所変数が無いので、ここで1つ足す（module() が locals を見る）
+    this.startLocals = [I32];
+    const name = SCRATCH + 8;
+    return [
+      ...op.i32(3), ...op.localSet(fd),
+      ...op.block(EMPTY), ...op.loop(EMPTY),
+      ...op.localGet(fd), ...op.i32(SCRATCH), ...op.call(IMP.prestat), ...op.brIf(1),
+      ...op.localGet(fd), ...op.i32(64), ...op.i32GtU, ...op.brIf(1),
+      // 種類がフォルダ（0）で、名前が 8 バイトまでのものだけ見る
+      ...op.i32(SCRATCH), ...op.i32Load8u(0), ...op.i32Eqz, ...op.i32(SCRATCH), ...op.i32Load(4), ...op.i32(8), ...op.i32LeU, ...op.i32And,
+      ...op.if(EMPTY),
+      ...op.i32(name), ...op.i64(0), ...op.i64Store(0),
+      ...op.localGet(fd), ...op.i32(name), ...op.i32(SCRATCH), ...op.i32Load(4), ...op.call(IMP.prestatName), ...op.i32Eqz,
+      ...op.if(EMPTY),
+      // "read"（4 バイト）
+      ...op.i32(SCRATCH), ...op.i32Load(4), ...op.i32(4), ...op.i32Eq, ...op.i32(name), ...op.i32Load(0), ...op.i32(0x64616572), ...op.i32Eq, ...op.i32And,
+      ...op.globalGet(G.readFd), ...op.i32(0), ...op.i32LtS, ...op.i32And,
+      ...op.if(EMPTY), ...op.localGet(fd), ...op.globalSet(G.readFd), ...op.end,
+      // "write"（5 バイト）
+      ...op.i32(SCRATCH), ...op.i32Load(4), ...op.i32(5), ...op.i32Eq, ...op.i32(name), ...op.i32Load(0), ...op.i32(0x74697277), ...op.i32Eq, ...op.i32And,
+      ...op.i32(name), ...op.i32Load8u(4), ...op.i32(0x65), ...op.i32Eq, ...op.i32And,
+      ...op.globalGet(G.writeFd), ...op.i32(0), ...op.i32LtS, ...op.i32And,
+      ...op.if(EMPTY), ...op.localGet(fd), ...op.globalSet(G.writeFd), ...op.end,
+      ...op.end,
+      ...op.end,
+      ...op.localGet(fd), ...op.i32(1), ...op.i32Add, ...op.localSet(fd), ...op.br(0),
+      ...op.end, ...op.end,
+    ];
+  }
+
+  // write_text(path, text) -> Result[Unit] の場所。パスがおかしければ 0、外を指すなら 1（呼ぶ側が R507 で止める）
+  writeTextFn() {
+    const rt = { k: 'Data', name: 'Result', args: [{ k: 'Unit' }] };
+    return this.gen('write_text', [I32, I32], [I32], (local) => {
+      const [e, fd, at, n, tmp] = [local(I32), local(I32), local(I32), local(I32), local(I32)];
+      const ctx = { local: () => tmp };
+      const msg = (pre, post) => [...op.i32(this.str(pre)), ...op.localGet(0), ...op.call(this.h.concat), ...op.i32(this.str(post)), ...op.call(this.h.concat)];
+      const err = (code) => [...this.mkData(rt, 'Err', [code], ctx, null), ...op.return];
+      const cantWrite = err(msg("'", "' could not be written"));
+      return [
+        ...op.localGet(0), ...op.i32(1), ...op.call(this.pathOkFn()), ...op.i32Eqz, ...op.if(EMPTY), ...op.i32(0), ...op.return, ...op.end,
+        ...op.globalGet(this.G.writeFd), ...op.localGet(0), ...op.call(this.linkOnTheWayFn()), ...op.if(EMPTY), ...op.i32(1), ...op.return, ...op.end,
+        // 開ける：書く権利（fd_write）だけを頼み、無ければ作り、あれば空にする。リンクはたどらない（書く先がリンクなら断られる）
+        ...op.globalGet(this.G.writeFd), ...op.i32(0), ...op.localGet(0), ...op.i32(4), ...op.i32Add, ...op.localGet(0), ...op.i32Load(0),
+        ...op.i32(1 | 8), ...op.i64(64), ...op.i64(0), ...op.i32(0), ...op.i32(SCRATCH),
+        ...op.call(this.imp.pathOpen), ...op.localTee(e),
+        ...op.if(EMPTY),
+        // 76 ENOTCAPABLE・63 EPERM・32 ELOOP（書く先がリンク）は、外を指すものとして止める
+        ...op.localGet(e), ...op.i32(76), ...op.i32Eq, ...op.localGet(e), ...op.i32(63), ...op.i32Eq, ...op.i32Or, ...op.localGet(e), ...op.i32(32), ...op.i32Eq, ...op.i32Or,
+        ...op.if(EMPTY), ...op.i32(1), ...op.return, ...op.end,
+        ...op.localGet(e), ...op.i32(44), ...op.i32Eq, ...op.if(EMPTY), ...err(msg("the folder of '", "' does not exist")), ...op.end,
+        ...op.localGet(e), ...op.i32(31), ...op.i32Eq, ...op.if(EMPTY), ...err(msg("'", "' is not a file")), ...op.end,
+        ...cantWrite,
+        ...op.end,
+        ...op.i32(SCRATCH), ...op.i32Load(0), ...op.localSet(fd),
+        // 書く：全部書けるまでくり返す（一度に少ししか書けないこともある）
+        ...op.i32(0), ...op.localSet(at), ...op.localGet(1), ...op.i32Load(0), ...op.localSet(n),
+        ...op.block(EMPTY), ...op.loop(EMPTY),
+        ...op.localGet(at), ...op.localGet(n), ...op.i32GeU, ...op.brIf(1),
+        ...op.i32(IOV), ...op.localGet(1), ...op.i32(4), ...op.i32Add, ...op.localGet(at), ...op.i32Add, ...op.i32Store(0),
+        ...op.i32(IOV), ...op.localGet(n), ...op.localGet(at), ...op.i32Sub, ...op.i32Store(4),
+        ...op.localGet(fd), ...op.i32(IOV), ...op.i32(1), ...op.i32(SCRATCH + 8), ...op.call(this.imp.fdWrite),
+        ...op.i32(SCRATCH + 8), ...op.i32Load(0), ...op.i32Eqz, ...op.i32Or,
+        ...op.if(EMPTY), ...op.localGet(fd), ...op.call(this.imp.fdClose), ...op.drop, ...cantWrite, ...op.end,
+        ...op.localGet(at), ...op.i32(SCRATCH + 8), ...op.i32Load(0), ...op.i32Add, ...op.localSet(at), ...op.br(0),
+        ...op.end, ...op.end,
+        ...op.localGet(fd), ...op.call(this.imp.fdClose), ...op.if(EMPTY), ...cantWrite, ...op.end,
+        ...this.mkData(rt, 'Ok', [[]], ctx, null),
+      ];
+    });
+  }
+
+  readTextFn() {
+    const utf8ok = this.utf8OkFn();
+    const slice = this.sliceFn();
+    const rt = { k: 'Data', name: 'Result', args: [{ k: 'Str' }] };
+    return this.gen('read_text', [I32], [I32], (local) => {
+      const [n, e, fd, buf, cap, total, nr, tmp] = [local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32)];
+      const ctx = { local: () => tmp };
+      const byte = (at) => [...op.localGet(0), ...at, ...op.i32Add, ...op.i32Load8u(4)];
+      const err = (suffix) => [
+        ...this.mkData(rt, 'Err', [[...op.i32(this.str("'")), ...op.localGet(0), ...op.call(this.h.concat), ...op.i32(this.str(`' ${suffix}`)), ...op.call(this.h.concat)]], ctx, null),
+        ...op.return,
+      ];
+      const ret0 = [...op.i32(0), ...op.return];
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n),
+        ...op.localGet(0), ...op.i32(0), ...op.call(this.pathOkFn()), ...op.i32Eqz, ...op.if(EMPTY), ...ret0, ...op.end,
+        ...op.globalGet(this.G.readFd), ...op.localGet(0), ...op.call(this.linkOnTheWayFn()), ...op.if(EMPTY), ...op.i32(1), ...op.return, ...op.end,
+        // 開ける：読む権利（fd_read と fd_filestat_get）だけを頼む（書く・作る権利は頼まない）。リンクはたどらない
+        ...op.globalGet(this.G.readFd), ...op.i32(0), ...op.localGet(0), ...op.i32(4), ...op.i32Add, ...op.localGet(n), ...op.i32(0), ...op.i64(2 + 2097152), ...op.i64(0), ...op.i32(0), ...op.i32(SCRATCH),
         ...op.call(this.imp.pathOpen), ...op.localTee(e),
         ...op.if(EMPTY),
         ...op.localGet(e), ...op.i32(76), ...op.i32Eq, ...op.localGet(e), ...op.i32(63), ...op.i32Eq, ...op.i32Or, ...op.if(EMPTY), ...op.i32(1), ...op.return, ...op.end,

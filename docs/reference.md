@@ -40,7 +40,7 @@ end
 
 - 返す型は必ず書きます（E102）。何も返さないなら `-> Unit`。
 - `requires`・`ensures`・`example` は `-> 型` と `do` のあいだに、好きな順で書きます。
-- **純粋な関数**：鍵（`Console`・`Folder`）を引数に取らず、`main` でもない関数。`ensures`（E401）と `example`（E402）が要ります。何も約束できないときだけ `ensures true` と書きます。
+- **純粋な関数**：鍵（`Console`・`Folder`・`OutFolder`）を引数に取らず、`main` でもない関数。`ensures`（E401）と `example`（E402）が要ります。何も約束できないときだけ `ensures true` と書きます。
 - 鍵を引数に取る関数と `main` には、`ensures`・`example` は要りません。
 - `main` は鍵だけを引数に取り（同じ型は1つずつ）、`Unit` を返します（E303）。
 - `requires`・`ensures`・`example` の中では鍵を使えません。
@@ -62,6 +62,7 @@ end
 | `Sql` | 組み立て済みの SQL と値 | `sql(...)` だけで作る |
 | `Console` | 画面に出す鍵 | 作れない。`main` が受け取る |
 | `Folder` | フォルダを読む鍵 | 作れない。`main` が受け取る |
+| `OutFolder` | フォルダに書く鍵 | 作れない。`main` が受け取る |
 | 自分で作る型 | 下を見る | `type 名前 ... end` |
 
 - 小数はありません（E101）。null もありません。
@@ -147,7 +148,8 @@ end
 | 鍵 | できること | 渡されるとき |
 | --- | --- | --- |
 | `Console` | `print(to: console, value: x)` | いつも |
-| `Folder` | `read_text(from: folder, path: "a.txt")`。読むだけ。渡したフォルダの中だけ | `--allow-read <フォルダ>` を付けて動かしたときだけ |
+| `Folder` | `read_text(from: folder, path: "a.txt")`。読むだけ。渡したフォルダの中だけ。リンクはたどらない | `--allow-read <フォルダ>` を付けて動かしたときだけ |
+| `OutFolder` | `write_text(to: out, path: "a.txt", text: s)`。ファイルを作るか、まるごと書きかえる。渡したフォルダの中だけ。フォルダは作らず、消さない。リンクはたどらない | `--allow-write <フォルダ>` を付けて動かしたときだけ |
 
 - 鍵を受け取れるのは `main` だけです。ほかの関数には引数で渡します。
 - 鍵を持たない関数で鍵の要る関数を呼ぶと E300 です。直し方に、引数の足し方が出ます。
@@ -171,6 +173,7 @@ end
 | --- | --- |
 | `print(to: console, value: x)` | 何でも → Unit。画面に1行出す（鍵 Console が要る） |
 | `read_text(from: folder, path: p)` | Result[Str]。無い・フォルダ・UTF-8 でないときは Err（鍵 Folder が要る） |
+| `write_text(to: out, path: p, text: s)` | Result[Unit]。親フォルダが無い・フォルダを指すときは Err（鍵 OutFolder が要る）。空の段・`.` の段は R507 |
 | `lines(text: s)` | List[Str]。行に分ける（`\r\n` も可、最後の改行は数えない） |
 | `parse_int(text: s)` | Option[Int]。前後の空白は無視。整数でなければ None |
 | `len(list: xs)` | Int |

@@ -20,7 +20,8 @@ node bin/akashi.js wasm gcd.wasm                       # 動かす（渡すの�
 node bin/akashi.js build examples/read_file.ak -o r.wasm
 node bin/akashi.js wasm r.wasm --allow-read examples/files   # 読んでよいフォルダを1つ渡す
 wasmtime gcd.wasm                                      # wasmtime など、ほかの WASI の実行環境でも動く
-wasmtime --dir examples/files::. r.wasm                # フォルダは最初に開けたもの（fd 3）として渡す
+wasmtime --dir examples/files::read r.wasm             # 読むフォルダは「read」、書くフォルダは「write」という名前で渡す
+node bin/akashi.js wasm w.wasm --allow-write ./out      # 書いてよいフォルダを1つ渡す
 ```
 
 - `build` は、`check` が通ったプログラムだけをコンパイルします。
@@ -33,7 +34,7 @@ wasmtime --dir examples/files::. r.wasm                # フォルダは最初�
 | --- | --- |
 | Int・Bool・Str・Unit・List・Dict・Option・Result・自分で作る型・Html・Sql | 関数を値として let に入れる・引数で受け取る・表示する |
 | 関数・再帰・let・if・when・match | |
-| Folder と read_text（渡したフォルダの中だけ。段階3） | |
+| Folder と read_text、OutFolder と write_text（渡したフォルダの中だけ。段階3・4） | |
 | requires・ensures（毎回確かめる） | |
 | print・to_str・str_len・parse_int・trim・chars・split・join・contains・starts_with・ends_with・lines・slice・code_of・char_of | |
 | html・html_text・html_join・sql（穴の数は R510 で確かめる） | |
@@ -58,10 +59,11 @@ wasmtime --dir examples/files::. r.wasm                # フォルダは最初�
 - **メモリは増える一方**：今は、使い終わった値を片付けません（ごみ集めをしない）。プログラムは短く終わる前提です。
 - **鍵（Console）は消える**：鍵の使い方は検査で確かめ終わっているので、実行時には何も渡しません。
 - **外とのつながりは最小**：ふつうは WASI の `fd_write`（画面と標準エラーに書く）と `proc_exit`（終わる）の2つだけを取り込みます。時計・乱数・通信は取り込まないので、コンパイルしたプログラムはそれらに触れません（テストが取り込みの一覧を確かめます）。
-- **ファイルを読むときだけ5つ足す**：`main` が Folder を受け取るときだけ、`fd_prestat_get`・`path_open`・`fd_filestat_get`・`fd_read`・`fd_close` を取り込みます。
-  - 読むフォルダは、実行する側が最初に開けて渡したもの（fd 3）だけです。始めに fd 3 があるかを確かめ、無ければ R509 で止まります（インタプリタの `--allow-read` 無しと同じ）。
-  - `path_open` では読む権利（`fd_read`・`fd_filestat_get`）だけを頼みます。書く・作る・消す権利は頼みません。受け皿（`src/host.js`）も、それ以外を頼まれたら断ります。
-  - `..`・絶対パス・`C:`・`\`・空のパスは、開ける前に R507 で止めます。フォルダの外を指すリンクは、実行する側が断る（ENOTCAPABLE）ので、それも R507 にします。
+- **ファイルに触るときだけ足す**：`main` が Folder か OutFolder を受け取るときだけ、`fd_prestat_get`・`fd_prestat_dir_name`・`path_filestat_get`・`path_open`・`fd_close` を、読むときはさらに `fd_filestat_get`・`fd_read` を取り込みます（書くのは画面と同じ `fd_write`）。
+  - フォルダは、実行する側が開けて渡したもの（preopen）を**名前で**見分けます。読むのは `read`、書くのは `write` という名前のものです（v0.13 から。前は fd 3 の「.」）。始めに fd 3 から順に調べ、要るものが無ければ R509 で止まります（インタプリタの `--allow-read`・`--allow-write` 無しと同じ）。
+  - 読むときは読む権利（`fd_read`・`fd_filestat_get`）だけ、書くときは書く権利（`fd_write`）と「無ければ作る・あれば空にする」だけを頼みます。消す・名前を変える権利は頼みません。受け皿（`src/host.js`）も、それ以外を頼まれたら断ります。
+  - `..`・絶対パス・`C:`・`\`・空のパスは、開ける前に R507 で止めます。
+  - リンクはたどりません：開ける前に、パスの段を前から1つずつ `path_filestat_get`（リンクをたどらない）で調べ、リンクがあれば R507 です。開けるときもリンクをたどらない頼み方をします。実行する側の sandbox だけに頼らないためです（node:wasi は段の途中のリンクを外までたどる）。
   - 正しい UTF-8 かを確かめ、先頭の BOM を落とします（インタプリタの TextDecoder と同じ）。読めないものは `Err` です。
 - **実行時の部品**も WebAssembly で書いています（`src/wasm.js` の `helpers`）：メモリの確保、文字の連結・比較・長さ、数を文字にする、あふれの確かめ、かけ算のあふれの確かめ、呼び出しの深さ、エラーで止める。
 - **インタプリタと同じ意味**にそろえています：Int は ±9007199254740991 を超えたら R504、0 で割ったら R503、再帰は 500 段まで（R505）、requires（R500）・ensures（R501）は毎回確かめる。
@@ -97,7 +99,7 @@ wasmtime --dir examples/files::. r.wasm                # フォルダは最初�
 | 1（済み） | Int・Bool・Str・関数・if・約束を、WebAssembly に0から書き出す。インタプリタとの差分テスト | `examples/` のうち、リストを使わないものが全部同じ答え |
 | 2（済み） | List・Option・Result・自分で作る型・match・リストの関数・文字の関数・Html/Sql。値は線形メモリに置く | `examples/` の全部（ファイル以外）が同じ答え |
 | 3（済み） | Folder（WASI の `path_open`。渡したフォルダだけを開ける）。自分の受け皿と、もう1つの WASI の実装（Node の node:wasi）の両方で確かめる。末尾呼び出し（`return_call`）は見送った（インタプリタの再帰の上限 500 と答えをそろえるため。長いくり返しは range と fold で書く） | `read_file.ak` が WASI の実行環境で、渡したフォルダだけを読んで動く |
-| 4（途中） | コンパイラを書くのに要る道具を言語に足す：文字を1文字ずつ見る・切り出す（chars・slice・code_of・char_of。済み）、辞書（Dict。済み）、バイトの並び（Bytes）、ファイルに書く鍵、複数のファイル（部品） | 字句解析を Akashi で書ける |
+| 4（途中） | コンパイラを書くのに要る道具を言語に足す：文字を1文字ずつ見る・切り出す（chars・slice・code_of・char_of。済み）、辞書（Dict。済み）、ファイルに書く鍵（OutFolder・write_text。済み）、複数のファイル（部品）、バイトの並び（Bytes） | 字句解析を Akashi で書ける |
 | 5 | Akashi でコンパイラを書く（`compiler/*.ak`）。今の JS のコンパイラ（段階0）でそれをコンパイルして `akashic.wasm`（段階1）を作る | `akashic.wasm` が `examples/` を正しくコンパイルする |
 | 6 | `akashic.wasm` で自分をコンパイルして段階2を作り、段階1と**1バイトも違わない**ことを確かめる（不動点） | テストで毎回確かめる。JS のコンパイラは「種」として残し、別の道で作った結果と比べる（[11]） |
 
