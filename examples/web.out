@@ -1,0 +1,2 @@
+<ul><li>Alice</li><li>&lt;script&gt;alert(1)&lt;/script&gt;</li></ul>
+SELECT id FROM users WHERE name = ? -- params: ["x' OR '1'='1"]

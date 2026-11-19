@@ -1,4 +1,4 @@
-# Akashi language spec (v0.2)
+# Akashi language spec (v0.3)
 
 Paste this whole file into an LLM prompt to teach it Akashi. It is short on purpose.
 
@@ -9,6 +9,7 @@ Paste this whole file into an LLM prompt to teach it Akashi. It is short on purp
 3. **Every error says how to fix it.** Each diagnostic has a stable code, a position and a `fix` text. See `docs/ERRORS.md`.
 4. **Promises are code.** Pure functions must state `ensures` (a promise about `result`) and at least one `example`. Examples run on every `check`.
 5. **No ambient authority.** A function can touch the outside world (screen, files) only through a capability it was given as a parameter. Only `main` receives capabilities, from the runtime; nobody can create one.
+6. **Outside text never changes the shape of HTML or SQL.** `Html` and `Sql` are built only from a literal template plus values (see below).
 
 ## Program
 
@@ -40,9 +41,24 @@ end
 - A capability can only be a parameter: it cannot be stored in `let`, returned, put in a list, or compared (E309).
 - `requires`, `ensures` and `example` cannot use capabilities.
 
+## HTML and SQL (injection-safe by construction)
+
+```
+html(template: "<li>{}</li>", values: [html_text(value: name)])          # -> Html
+sql(template: "SELECT id FROM users WHERE name = ?", values: [name])  # -> Sql
+```
+
+- `template` must be a string literal written in the code (E310). Never build it with `++`.
+- One value per hole, in order: `{}` for html, `?` for sql (E311 / R510).
+- An html hole takes `Html`. Turn a `Str` into `Html` with `html_text(value: s)`, which escapes `< > & " '`. Join pieces with `html_join(parts: [...])`.
+- `Sql` keeps the values separate from the query text (parameters), so they are never read as SQL.
+- `Html` and `Sql` cannot be joined with `++`. `to_str` / `print` show them.
+- There is no `eval` and no way to run code from a string.
+- Not covered yet: putting a URL into `href`/`src` (a `javascript:` URL is still possible). Do not put outside values into URL attributes.
+
 ## Types
 
-`Int` (whole numbers only, overflow is an error), `Bool`, `Str`, `Unit` (written `()`), `List[T]`, and the capabilities `Console`, `Folder`.
+`Int` (whole numbers only, overflow is an error), `Bool`, `Str`, `Unit` (written `()`), `List[T]`, `Html`, `Sql`, and the capabilities `Console`, `Folder`.
 There are no decimals, no null and no user-defined types yet.
 
 ## Names
@@ -80,6 +96,10 @@ area(h: 4, w: 3)        # E207
 | `print(to: console, value: x)` | any → Unit (needs a Console) |
 | `read_text(from: folder, path: p)` | Str (needs a Folder) |
 | `lines(text: s)` | List[Str], split at line ends |
+| `html(template: "...", values: [...])` | Html (values: List[Html]) |
+| `html_text(value: s)` | Html, escaped |
+| `html_join(parts: xs)` | Html |
+| `sql(template: "...", values: [...])` | Sql (values: List[Str]) |
 | `len(list: xs)` | List[T] → Int |
 | `str_len(text: s)` | Str → Int |
 | `to_str(value: x)` | any → Str |

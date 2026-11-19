@@ -5,8 +5,13 @@ import { AkashiError, diag } from './errors.js';
 
 const MAX_DEPTH = 500; // JS の呼び出しの深さに収まる数（約800で JS が先にあふれる）。長いくり返しは range と fold で書く
 
+const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const escapeHtml = (x) => x.replace(/[&<>"']/g, (c) => ESC[c]);
+
 export function show(v, nested = false) {
   if (v === null) return '()';
+  if (v && v.html !== undefined) return v.html;
+  if (v && v.sql !== undefined) return `${v.sql} -- params: ${JSON.stringify(v.params)}`;
   if (Array.isArray(v)) return `[${v.map((x) => show(x, true)).join(', ')}]`;
   if (typeof v === 'string') return nested ? JSON.stringify(v) : v;
   if (typeof v === 'object' && v.fnref) return `<fn ${v.fnref}>`;
@@ -61,6 +66,18 @@ export class Machine {
   builtin(name, a, pos) {
     switch (name) {
       case 'print': this.out(`${show(a.value)}\n`); return null;
+      case 'html': {
+        const parts = a.template.split('{}');
+        this.holes(parts.length - 1, a.values.length, pos, '{}');
+        return { html: parts.map((p, i) => (i === 0 ? '' : a.values[i - 1].html) + p).join('') };
+      }
+      case 'html_text': return { html: escapeHtml(a.value) };
+      case 'html_join': return { html: a.parts.map((x) => x.html).join('') };
+      case 'sql': {
+        this.holes(a.template.split('?').length - 1, a.values.length, pos, '?');
+        // 値は文に混ぜず、別に持つ（データベースに渡すときはプレースホルダとして渡す）
+        return { sql: a.template, params: [...a.values] };
+      }
       case 'read_text': return this.readText(a.from, a.path, pos);
       case 'lines': return a.text === '' ? [] : a.text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');
       case 'len': return a.list.length;
@@ -81,6 +98,10 @@ export class Machine {
       case 'fold': return a.list.reduce((acc, x) => this.apply(a.func, [acc, x], pos), a.init);
       default: throw new Error(`internal: unknown function ${name}`);
     }
+  }
+
+  holes(holes, values, pos, mark) {
+    if (holes !== values) this.fail('R510', `the template has ${holes} hole(s) '${mark}' but ${values} value(s) were given`, pos, `give exactly one value per '${mark}'`);
   }
 
   // Folder の権利で読めるのは、渡されたフォルダの中だけ（.. や絶対パス、外を指すリンクは止める）

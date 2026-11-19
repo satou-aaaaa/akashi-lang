@@ -24,6 +24,8 @@ export const CODES = {
   E304: 'function with capabilities passed as value',
   E305: 'effects clause (replaced by capabilities)',
   E309: 'capability stored, returned or compared',
+  E310: 'template is not a literal',
+  E311: 'template holes and values do not match',
   E401: 'missing ensures',
   E402: 'missing example',
   R500: 'requires failed',
@@ -36,6 +38,7 @@ export const CODES = {
   R507: 'path escapes the folder',
   R508: 'file not readable',
   R509: 'capability not granted',
+  R510: 'template holes and values do not match',
 };
 
 // もう出さないコード（意味は変えず、番号を使い回さない）

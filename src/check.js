@@ -8,6 +8,11 @@ export const UNIT = { k: 'Unit' };
 const ERR = { k: 'Err' };
 export const CONSOLE = { k: 'Console' };
 export const FOLDER = { k: 'Folder' };
+export const HTML = { k: 'Html' };
+export const SQL = { k: 'Sql' };
+// 型紙の穴の数（html は {}、sql は ?）
+export const HOLE = { html: '{}', sql: '?' };
+export const countHoles = (template, hole) => template.split(hole).length - 1;
 // 権利（ケーパビリティ）の型。値を作る方法は無く、main が受け取って引数で渡すだけ
 const CAPS = ['Console', 'Folder'];
 const isCap = (t) => CAPS.includes(prune(t).k);
@@ -59,6 +64,10 @@ export const BUILTINS = {
   print: () => ({ params: [['to', CONSOLE], ['value', fresh()]], ret: UNIT }),
   read_text: () => ({ params: [['from', FOLDER], ['path', STR]], ret: STR }),
   lines: () => ({ params: [['text', STR]], ret: List(STR) }),
+  html: () => ({ params: [['template', STR], ['values', List(HTML)]], ret: HTML }),
+  html_text: () => ({ params: [['value', STR]], ret: HTML }),
+  html_join: () => ({ params: [['parts', List(HTML)]], ret: HTML }),
+  sql: () => ({ params: [['template', STR], ['values', List(STR)]], ret: SQL }),
   len: () => ({ params: [['list', List(fresh())]], ret: INT }),
   str_len: () => ({ params: [['text', STR]], ret: INT }),
   to_str: () => ({ params: [['value', fresh()]], ret: STR }),
@@ -206,7 +215,10 @@ export function check(program) {
       case '++': {
         const pl = prune(l);
         if (pl.k !== 'Str' && pl.k !== 'List' && pl.k !== 'Var' && pl.k !== 'Err') {
-          err('E201', `'++' joins Str or List but the left side is ${typeStr(l)}`, e.pos, 'for Int use +; to put a number in text use to_str(value: n) ++ "..."');
+          const fix = pl.k === 'Html' ? 'join Html pieces with html_join(parts: [a, b]); never turn them back into Str to join'
+            : pl.k === 'Sql' ? 'write the whole query as one sql(template: "...", values: [...]); queries are never joined from pieces'
+              : 'for Int use +; to put a number in text use to_str(value: n) ++ "..."';
+          err('E201', `'++' joins Str or List but the left side is ${typeStr(l)}`, e.pos, fix);
           return ERR;
         }
         if (!unify(l, r)) {
@@ -230,6 +242,20 @@ export function check(program) {
       return ERR;
     }
     const template = callTemplate(e.name, sig.params);
+    if (e.name in HOLE) {
+      const t = e.args.find((a) => a.name === 'template');
+      if (t && t.value.k !== 'str') {
+        err('E310', `the template of ${e.name} must be written as a literal string`, t.pos,
+          `write the fixed part in quotes and put outside values in values: e.g. ${e.name}(template: "${e.name === 'html' ? '<p>{}</p>' : 'SELECT * FROM users WHERE name = ?'}", values: [name]). Never build the template from other strings`);
+      }
+      const v = e.args.find((a) => a.name === 'values');
+      if (t && t.value.k === 'str' && v && v.value.k === 'list') {
+        const holes = countHoles(t.value.v, HOLE[e.name]);
+        if (holes !== v.value.items.length) {
+          err('E311', `the template has ${holes} hole(s) '${HOLE[e.name]}' but ${v.value.items.length} value(s) are given`, v.pos, `give exactly one value per '${HOLE[e.name]}' in the same order`);
+        }
+      }
+    }
     const names = sig.params.map(([n]) => n);
 
     let argsOk = true;
@@ -268,7 +294,10 @@ export function check(program) {
       if (!argsOk || a.name === null) continue;
       const want = p[1];
       if (!unify(want, t)) {
-        err('E201', `argument '${a.name}' of '${e.name}' must be ${typeStr(want)} but got ${typeStr(t)}`, a.pos, prune(want).k === 'Fn' ? `pass the name of a pure function of type ${typeStr(want)}` : `pass a ${typeStr(want)}`);
+        const fix = prune(want).k === 'Fn' ? `pass the name of a pure function of type ${typeStr(want)}`
+          : typeStr(want) === 'List[Html]' ? 'turn each Str into Html with html_text(value: s) (it escapes < > & " \'), e.g. values: [html_text(value: name)]'
+            : `pass a ${typeStr(want)}`;
+        err('E201', `argument '${a.name}' of '${e.name}' must be ${typeStr(want)} but got ${typeStr(t)}`, a.pos, fix);
       }
     }
     return sig.ret;
