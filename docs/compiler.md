@@ -100,8 +100,38 @@ node bin/akashi.js wasm w.wasm --allow-write ./out      # 書いてよいフォ�
 | 2（済み） | List・Option・Result・自分で作る型・match・リストの関数・文字の関数・Html/Sql。値は線形メモリに置く | `examples/` の全部（ファイル以外）が同じ答え |
 | 3（済み） | Folder（WASI の `path_open`。渡したフォルダだけを開ける）。自分の受け皿と、もう1つの WASI の実装（Node の node:wasi）の両方で確かめる。末尾呼び出し（`return_call`）は見送った（インタプリタの再帰の上限 500 と答えをそろえるため。長いくり返しは range と fold で書く） | `read_file.ak` が WASI の実行環境で、渡したフォルダだけを読んで動く |
 | 4（済み） | コンパイラを書くのに要る道具を言語に足す：文字を1文字ずつ見る・切り出す（chars・slice・code_of・char_of。済み）、辞書（Dict。済み）、ファイルに書く鍵（OutFolder・write_text。済み）、複数のファイル（use。済み）、バイトを書く（write_bytes。済み。Bytes の型は作らず List[Int] にした） | 字句解析を Akashi で書ける |
-| 5（途中） | Akashi でコンパイラを書く（`compiler/*.ak`。字句解析 `compiler/lexer.ak` は済み：リポジトリの全部の .ak で JS と同じ字句になることを、インタプリタと .wasm の両方で確かめる）。今の JS のコンパイラ（段階0）でそれをコンパイルして `akashic.wasm`（段階1）を作る | `akashic.wasm` が `examples/` を正しくコンパイルする |
+| 5（途中） | Akashi でコンパイラを書く（`compiler/*.ak`）。字句解析 `compiler/lexer.ak` と構文解析 `compiler/parser.ak` は済み：リポジトリの全部の .ak と壊れた例で、JS と同じ字句・同じ木・同じエラー（番号・位置・説明）になることを、インタプリタと .wasm の両方で確かめる（`test/selfhost.test.js`）。次は型の検査とコード生成。今の JS のコンパイラ（段階0）でそれをコンパイルして `akashic.wasm`（段階1）を作る | `akashic.wasm` が `examples/` を正しくコンパイルする |
 | 6 | `akashic.wasm` で自分をコンパイルして段階2を作り、段階1と**1バイトも違わない**ことを確かめる（不動点） | テストで毎回確かめる。JS のコンパイラは「種」として残し、別の道で作った結果と比べる（[11]） |
+
+## 構文解析の木（compiler/parser.ak）
+
+Akashi には総称の型が無いので、木はどこも1つの形 `Node(kind, text, line, col, kids)` です。位置の無いもの（型・ブロック・約束の文）は line・col が 0 です。テストは src/parse.js の木を同じ形の文字にして比べます（`test/selfhost.test.js` の treeText）。
+
+| kind | text | kids |
+| --- | --- | --- |
+| program | | use…・type…・fn…（この順） |
+| use | パス | |
+| type | 型の名前 | case… |
+| case | case の名前 | field… |
+| field・param | 名前 | 型 |
+| t | 型の名前（Int・List・Option・自分の型） | 中の型（List[Int] なら Int） |
+| fn | 関数の名前 | params・戻りの型・requires・ensures・examples・本体の block |
+| requires・ensures・examples | | clause… |
+| clause | 元の書き方（エラー文に出す） | 式 |
+| block | | let・do の行…・最後の値の式 |
+| let | 名前 | 型・値 |
+| do | | 式（値を使わない行） |
+| int・str・bool・var | 書いたもの（int は元の数字のまま） | |
+| unit・list | | 要素… |
+| bin・un | 演算子（and・or・not も） | 左・右／中 |
+| if | | 条件・then の block・else の block（when も入れ子の if にする） |
+| call | 関数の名前 | arg…（text は引数の名前。名前の無いものは ""） |
+| match | | 調べる値・arm… |
+| arm | case の名前 | at（case の名前の位置）・bind…（text は「欄 名前」）・値 |
+
+くり返し（引数の並び・ブロックの行など）は、再帰でなく fold で回します。回す数を 4・8・16… と倍にしていき、終わったあとの回は何もしません。再帰の深さは入れ子の深さ（と並びの長さの log）だけなので、インタプリタの深さ 500 の上限に届きません。
+
+長い並びを作るときは、`append` を何千回もくり返さないでください（毎回写すので長さの2乗になり、ごみ集めの無い .wasm ではメモリがあふれます）。字句解析は行ごとに小さな並びを作り、最後に `concat` で1つにしています。
 
 段階4で足す道具は、コンパイラのためだけでなく、ふつうのプログラムにも役に立つものを選びます。足すたびに [設計の根拠](DESIGN.md) の表と [言語の決まり](reference.md) を直します。
 

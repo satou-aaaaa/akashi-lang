@@ -49,6 +49,7 @@ export const CODES = {
   R510: 'template holes and values do not match',
   R511: 'ensures fails for a generated input',
   R512: 'crash on a generated input that satisfies requires',
+  R513: 'out of memory (compiled program)',
 };
 
 // もう出さないコード（意味は変えず、番号を使い回さない）

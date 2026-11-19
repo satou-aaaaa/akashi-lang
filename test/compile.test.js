@@ -418,3 +418,58 @@ test('compiled reading does not follow links even on a WASI host that would (nod
     assert.doesNotMatch(readFileSync(outPath, 'utf8'), /secret/, p);
   }
 });
+
+// 2026-11-19：join・リストの表示が concat のくり返しで、長さの2乗の時間とメモリだった（大きな木の表示で 4GB を超え、場所があふれて壊れた）。
+// 長いものでも1回でつなぐこと、concat が同じ答えを出すことを、インタプリタと比べて確かめる
+test('join, showing long lists and concat take linear time and memory, and agree with the interpreter', () => {
+  const src = `fn piece(i: Int) -> Str
+  ensures str_len(text: result) > 0
+  example piece(i: 3) == "item 3"
+do
+  "item " ++ to_str(value: i)
+end
+
+fn twice(i: Int) -> List[Int]
+  ensures len(list: result) == 2
+  example twice(i: 1) == [1, 1]
+do
+  [i, i]
+end
+
+fn main(console: Console) -> Unit
+do
+  let xs: List[Int] = range(from: 0, to: 200000)
+  print(to: console, value: str_len(text: to_str(value: xs)))
+  print(to: console, value: str_len(text: join(parts: map(list: xs, func: piece), by: ", ")))
+  print(to: console, value: str_len(text: to_str(value: dict(keys: map(list: range(from: 0, to: 20000), func: piece), values: range(from: 0, to: 20000)))))
+  let ys: List[Int] = concat(lists: map(list: xs, func: twice))
+  print(to: console, value: [len(list: ys), get(list: ys, index: 399999), sum(list: ys)])
+  print(to: console, value: concat(lists: [[1], [], [2, 3]]))
+  print(to: console, value: join(parts: [], by: ", ") == "")
+end
+`;
+  const t0 = Date.now();
+  assert.ok(same(src, 'long lists'));
+  assert.ok(Date.now() - t0 < 20000, `took ${Date.now() - t0} ms`);
+});
+
+// 大きすぎる値は、前に作った値を壊さずに R513 で止まる（前は場所があふれて、メモリの外を書く失敗か、黙って上書きした）
+test('a compiled program that runs out of memory stops with R513 instead of overwriting memory', () => {
+  const big = 'x'.repeat(1200);
+  const src = `fn piece(i: Int) -> Str
+  ensures true
+  example str_len(text: piece(i: 0)) == 1200
+do
+  "${big}"
+end
+
+fn main(console: Console) -> Unit
+do
+  print(to: console, value: str_len(text: join(parts: map(list: range(from: 0, to: 1000000), func: piece), by: "")))
+end
+`;
+  const w = viaWasm(src);
+  assert.equal(w.exit, 1, w.err);
+  assert.equal(w.code, 'R513');
+  assert.match(w.err, /out of memory/);
+});

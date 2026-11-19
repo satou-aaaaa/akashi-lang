@@ -21,7 +21,7 @@ end
 
 fn show_token(t: Token) -> Str
   ensures true
-  example show_token(t: Token(kind: "id", text: "x", line: 1, col: 2)) == "Token(kind: \"id\", text: \"x\", line: 1, col: 2)"
+  example show_token(t: Token(kind: "id", text: "x", line: 1, col: 2, end_col: 3)) == "Token(kind: \"id\", text: \"x\", line: 1, col: 2, end_col: 3)"
 do
   to_str(value: t)
 end

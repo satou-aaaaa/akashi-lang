@@ -182,6 +182,7 @@ export class Machine {
         if (a.index < 0 || a.index >= a.list.length) this.fail('R506', `index ${a.index} is out of range for a list of length ${a.list.length}`, pos, 'check 0 <= index and index < len(list: ...) before calling get');
         return a.list[a.index];
       case 'append': return [...a.list, a.item];
+      case 'concat': return a.lists.flat();
       case 'map': return a.list.map((x) => this.apply(a.func, [x], pos));
       case 'filter': return a.list.filter((x) => this.apply(a.func, [x], pos) === true);
       case 'fold': return a.list.reduce((acc, x) => this.apply(a.func, [acc, x], pos), a.init);

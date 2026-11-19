@@ -175,7 +175,8 @@ end
 | `at(list: xs, index: i)` | Option[T]; `None` when i is out of range (prefer this) |
 | `get(list: xs, index: i)` | T; out of range is an error, so only use it after checking `i < len(list: xs)` |
 | `find(list: xs, func: f)` | Option[T], the first item where f gives true |
-| `append(list: xs, item: x)` | List[T] |
+| `append(list: xs, item: x)` | List[T] (copies; to build a long list, collect small lists and `concat`) |
+| `concat(lists: xss)` | List[T] (joins a list of lists, linear time) |
 | `reverse(list: xs)` | List[T] |
 | `take(list: xs, count: n)` / `drop(list: xs, count: n)` | List[T]; first n items / all but the first n (n < 0 is an error) |
 | `sort(list: xs)` | List[Int], ascending |

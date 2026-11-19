@@ -1,14 +1,16 @@
 # Akashi の字句解析を Akashi で書いたもの（セルフホストの段階5のはじめ）。src/parse.js の lex と同じ字句を作る。
 # 文字を1つずつ fold で読み、状態（Lex）を次の状態にする。再帰は使わない（深さ 500 の上限があるため）。
 # 位置（行・列）は文字（コードポイント）で数える。
+# end_col：字句のすぐ後ろの列（字句は行をまたがない）。構文解析が約束の文を元の文から切り出すのに使う
 type Token
-  case Token(kind: Str, text: Str, line: Int, col: Int)
+  case Token(kind: Str, text: Str, line: Int, col: Int, end_col: Int)
 end
 
 # mode：none（字句の外）・num・id・str・esc（文字の中の \ の後）・op（2文字の記号かもしれない）・dot（数の後の .）・comment
+# toks は今の行の字句、rows はそれより前の行の字句（全部を1つの並びに足していくと、長さの2乗の時間とメモリになるため。最後に concat でつなぐ）
 # err が "" でなければ、そこで止まっている（"E100 1:5 ..." の形）
 type Lex
-  case Lex(mode: Str, buf: Str, at_line: Int, at_col: Int, line: Int, col: Int, toks: List[Token], err: Str)
+  case Lex(mode: Str, buf: Str, at_line: Int, at_col: Int, line: Int, col: Int, toks: List[Token], err: Str, rows: List[List[Token]])
 end
 
 fn is_digit(c: Str) -> Bool
@@ -46,47 +48,47 @@ end
 
 fn fail_at(st: Lex, code: Str, line: Int, col: Int, message: Str) -> Lex
   ensures true
-  example fail_at(st: start_state(), code: "E100", line: 1, col: 2, message: "x") == Lex(mode: "none", buf: "", at_line: 1, at_col: 1, line: 1, col: 1, toks: [], err: "E100 1:2 x")
+  example fail_at(st: start_state(), code: "E100", line: 1, col: 2, message: "x") == Lex(mode: "none", buf: "", at_line: 1, at_col: 1, line: 1, col: 1, toks: [], err: "E100 1:2 x", rows: [])
 do
   match st
-    case Lex(mode: m, buf: b, at_line: al, at_col: ac, line: l, col: c, toks: ts, err: _) then Lex(mode: m, buf: b, at_line: al, at_col: ac, line: l, col: c, toks: ts, err: code ++ " " ++ to_str(value: line) ++ ":" ++ to_str(value: col) ++ " " ++ message)
+    case Lex(mode: m, buf: b, at_line: al, at_col: ac, line: l, col: c, toks: ts, err: _, rows: rs) then Lex(mode: m, buf: b, at_line: al, at_col: ac, line: l, col: c, toks: ts, err: code ++ " " ++ to_str(value: line) ++ ":" ++ to_str(value: col) ++ " " ++ message, rows: rs)
   end
 end
 
 fn start_state() -> Lex
   ensures true
-  example start_state() == Lex(mode: "none", buf: "", at_line: 1, at_col: 1, line: 1, col: 1, toks: [], err: "")
+  example start_state() == Lex(mode: "none", buf: "", at_line: 1, at_col: 1, line: 1, col: 1, toks: [], err: "", rows: [])
 do
-  Lex(mode: "none", buf: "", at_line: 1, at_col: 1, line: 1, col: 1, toks: [], err: "")
+  Lex(mode: "none", buf: "", at_line: 1, at_col: 1, line: 1, col: 1, toks: [], err: "", rows: [])
 end
 
 # 今の字句（buf）を kind として出し、mode を none にする
 fn emit(st: Lex, kind: Str) -> Lex
   ensures true
-  example emit(st: Lex(mode: "id", buf: "x", at_line: 1, at_col: 1, line: 1, col: 2, toks: [], err: ""), kind: "id") == Lex(mode: "none", buf: "", at_line: 1, at_col: 1, line: 1, col: 2, toks: [Token(kind: "id", text: "x", line: 1, col: 1)], err: "")
+  example emit(st: Lex(mode: "id", buf: "x", at_line: 1, at_col: 1, line: 1, col: 2, toks: [], err: "", rows: []), kind: "id") == Lex(mode: "none", buf: "", at_line: 1, at_col: 1, line: 1, col: 2, toks: [Token(kind: "id", text: "x", line: 1, col: 1, end_col: 2)], err: "", rows: [])
 do
   match st
-    case Lex(mode: _, buf: b, at_line: al, at_col: ac, line: l, col: c, toks: ts, err: e) then Lex(mode: "none", buf: "", at_line: al, at_col: ac, line: l, col: c, toks: append(list: ts, item: Token(kind: kind, text: b, line: al, col: ac)), err: e)
+    case Lex(mode: _, buf: b, at_line: al, at_col: ac, line: l, col: c, toks: ts, err: e, rows: rs) then Lex(mode: "none", buf: "", at_line: al, at_col: ac, line: l, col: c, toks: append(list: ts, item: Token(kind: kind, text: b, line: al, col: ac, end_col: c)), err: e, rows: rs)
   end
 end
 
 # 1文字読んで進む（mode と buf を変える）。改行なら次の行の1列目
 fn take_char(st: Lex, c: Str, mode: Str, buf: Str) -> Lex
   ensures true
-  example take_char(st: start_state(), c: "\n", mode: "none", buf: "") == Lex(mode: "none", buf: "", at_line: 1, at_col: 1, line: 2, col: 1, toks: [], err: "")
+  example take_char(st: start_state(), c: "\n", mode: "none", buf: "") == Lex(mode: "none", buf: "", at_line: 1, at_col: 1, line: 2, col: 1, toks: [], err: "", rows: [[]])
 do
   match st
-    case Lex(mode: _, buf: _, at_line: al, at_col: ac, line: l, col: col, toks: ts, err: e) then if c == "\n" then Lex(mode: mode, buf: buf, at_line: al, at_col: ac, line: l + 1, col: 1, toks: ts, err: e) else Lex(mode: mode, buf: buf, at_line: al, at_col: ac, line: l, col: col + 1, toks: ts, err: e) end
+    case Lex(mode: _, buf: _, at_line: al, at_col: ac, line: l, col: col, toks: ts, err: e, rows: rs) then if c == "\n" then Lex(mode: mode, buf: buf, at_line: al, at_col: ac, line: l + 1, col: 1, toks: [], err: e, rows: append(list: rs, item: ts)) else Lex(mode: mode, buf: buf, at_line: al, at_col: ac, line: l, col: col + 1, toks: ts, err: e, rows: rs) end
   end
 end
 
 # 字句の始まりを今の位置にして、1文字読む
 fn begin(st: Lex, c: Str, mode: Str, buf: Str) -> Lex
   ensures true
-  example begin(st: start_state(), c: "a", mode: "id", buf: "a") == Lex(mode: "id", buf: "a", at_line: 1, at_col: 1, line: 1, col: 2, toks: [], err: "")
+  example begin(st: start_state(), c: "a", mode: "id", buf: "a") == Lex(mode: "id", buf: "a", at_line: 1, at_col: 1, line: 1, col: 2, toks: [], err: "", rows: [])
 do
   match st
-    case Lex(mode: m, buf: b, at_line: _, at_col: _, line: l, col: col, toks: ts, err: e) then take_char(st: Lex(mode: m, buf: b, at_line: l, at_col: col, line: l, col: col, toks: ts, err: e), c: c, mode: mode, buf: buf)
+    case Lex(mode: m, buf: b, at_line: _, at_col: _, line: l, col: col, toks: ts, err: e, rows: rs) then take_char(st: Lex(mode: m, buf: b, at_line: l, at_col: col, line: l, col: col, toks: ts, err: e, rows: rs), c: c, mode: mode, buf: buf)
   end
 end
 
@@ -95,7 +97,7 @@ fn mode_of(st: Lex) -> Str
   example mode_of(st: start_state()) == "none"
 do
   match st
-    case Lex(mode: m, buf: _, at_line: _, at_col: _, line: _, col: _, toks: _, err: _) then m
+    case Lex(mode: m, buf: _, at_line: _, at_col: _, line: _, col: _, toks: _, err: _, rows: _) then m
   end
 end
 
@@ -104,7 +106,7 @@ fn buf_of(st: Lex) -> Str
   example buf_of(st: start_state()) == ""
 do
   match st
-    case Lex(mode: _, buf: b, at_line: _, at_col: _, line: _, col: _, toks: _, err: _) then b
+    case Lex(mode: _, buf: b, at_line: _, at_col: _, line: _, col: _, toks: _, err: _, rows: _) then b
   end
 end
 
@@ -113,7 +115,7 @@ fn err_of(st: Lex) -> Str
   example err_of(st: start_state()) == ""
 do
   match st
-    case Lex(mode: _, buf: _, at_line: _, at_col: _, line: _, col: _, toks: _, err: e) then e
+    case Lex(mode: _, buf: _, at_line: _, at_col: _, line: _, col: _, toks: _, err: e, rows: _) then e
   end
 end
 
@@ -122,7 +124,7 @@ fn here(st: Lex) -> List[Int]
   example here(st: start_state()) == [1, 1]
 do
   match st
-    case Lex(mode: _, buf: _, at_line: _, at_col: _, line: l, col: c, toks: _, err: _) then [l, c]
+    case Lex(mode: _, buf: _, at_line: _, at_col: _, line: l, col: c, toks: _, err: _, rows: _) then [l, c]
   end
 end
 
@@ -131,7 +133,7 @@ fn started(st: Lex) -> List[Int]
   example started(st: start_state()) == [1, 1]
 do
   match st
-    case Lex(mode: _, buf: _, at_line: al, at_col: ac, line: _, col: _, toks: _, err: _) then [al, ac]
+    case Lex(mode: _, buf: _, at_line: al, at_col: ac, line: _, col: _, toks: _, err: _, rows: _) then [al, ac]
   end
 end
 
@@ -248,11 +250,11 @@ end
 # 字句の並び。読めなければ Err（"E100 行:列 説明"）
 fn lex(text: Str) -> Result[List[Token]]
   ensures true
-  example lex(text: "let x") == Ok(value: [Token(kind: "kw", text: "let", line: 1, col: 1), Token(kind: "id", text: "x", line: 1, col: 5)])
+  example lex(text: "let x") == Ok(value: [Token(kind: "kw", text: "let", line: 1, col: 1, end_col: 4), Token(kind: "id", text: "x", line: 1, col: 5, end_col: 6)])
   example lex(text: "1.5") == Err(message: "E101 1:1 decimal numbers are not supported")
 do
   let st: Lex = finish(st: fold(list: chars(text: text), init: start_state(), func: step))
   match st
-    case Lex(mode: _, buf: _, at_line: _, at_col: _, line: _, col: _, toks: ts, err: e) then if e == "" then Ok(value: ts) else Err(message: e) end
+    case Lex(mode: _, buf: _, at_line: _, at_col: _, line: _, col: _, toks: ts, err: e, rows: rs) then if e == "" then Ok(value: concat(lists: append(list: rs, item: ts))) else Err(message: e) end
   end
 end
