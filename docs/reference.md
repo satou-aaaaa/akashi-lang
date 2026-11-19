@@ -183,6 +183,17 @@ end
 | `map(list: xs, func: f)` | List[U]。f: fn(T) -> U |
 | `filter(list: xs, func: f)` | List[T]。f: fn(T) -> Bool |
 | `fold(list: xs, init: z, func: f)` | f: fn(たまった値, 要素) -> たまった値 |
+| `any(list: xs, func: f)`・`all(list: xs, func: f)` | Bool。f が true になる要素が1つでもあるか・全部か |
+| `reverse(list: xs)` | List[T]。逆の順 |
+| `take(list: xs, count: n)`・`drop(list: xs, count: n)` | List[T]。はじめの n 個・はじめの n 個を除いた残り。n が長さより大きければ全部・空。n が負なら R506 |
+| `sort(list: xs)` | List[Int]。小さい順 |
+| `sum(list: xs)` | Int。合計（あふれたら R504） |
+| `max(list: xs)`・`min(list: xs)` | Option[Int]。空なら None |
+| `chars(text: s)` | List[Str]。1文字（コードポイント）ずつ |
+| `split(text: s, by: sep)` | List[Str]。sep で分ける（sep が空なら R506。1文字ずつは chars） |
+| `join(parts: xs, by: sep)` | Str。sep をはさんでつなぐ |
+| `contains(text: s, part: p)`・`starts_with(text: s, prefix: p)`・`ends_with(text: s, suffix: p)` | Bool |
+| `trim(text: s)` | Str。前後の空白と改行を取る |
 | `html`・`html_text`・`html_join`・`sql` | 上の「HTML と SQL」 |
 
 ## 検査と実行

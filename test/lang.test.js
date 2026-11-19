@@ -227,3 +227,20 @@ test('recursive types work and generation stops at a safe depth', () => {
   assert.deepEqual(c.diagnostics, []);
   assert.ok(c.generated > 0);
 });
+
+// v0.7：標準の道具
+test('standard list and text tools', () => {
+  assert.equal(out('print(to: console, value: [take(list: [1, 2, 3], count: 5), drop(list: [1, 2, 3], count: 5), reverse(list: [1, 2])])'), '[[1, 2, 3], [], [2, 1]]\n');
+  assert.equal(out('print(to: console, value: [sort(list: [3, -1, 2]), [sum(list: [])]])'), '[[-1, 2, 3], [0]]\n');
+  assert.equal(out('print(to: console, value: [chars(text: ""), split(text: "a", by: ","), [join(parts: [], by: ",")]])'), '[[], ["a"], [""]]\n');
+});
+
+test('standard tools stop instead of guessing: negative counts, empty separators, overflowing sums', () => {
+  assert.equal(runSource('fn main(console: Console) -> Unit do print(to: console, value: take(list: [1], count: -1)) end').diagnostics[0].code, 'R506');
+  assert.equal(runSource('fn main(console: Console) -> Unit do print(to: console, value: split(text: "ab", by: "")) end').diagnostics[0].code, 'R506');
+  assert.equal(runSource('fn main(console: Console) -> Unit do print(to: console, value: sum(list: [9007199254740991, 1])) end').diagnostics[0].code, 'R504');
+});
+
+test('standard tool names are reserved like every other name', () => {
+  assert.ok(codes('fn sum(xs: List[Int]) -> Int\n  ensures true\n  example sum(xs: []) == 0\ndo 0 end\nfn main(console: Console) -> Unit do print(to: console, value: 1) end').includes('E203'));
+});
