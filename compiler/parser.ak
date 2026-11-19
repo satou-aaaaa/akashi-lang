@@ -615,13 +615,15 @@ fn p_type(ps: Ps, pos: Int) -> Parsed
   ensures true
   example r_node(r: p_type(ps: ps_of(text: "List[Option[Int]]"), pos: 0)) == bare(kind: "t", text: "List", kids: [bare(kind: "t", text: "Option", kids: [bare(kind: "t", text: "Int", kids: [])])])
   example r_err(r: p_type(ps: ps_of(text: "Null"), pos: 0)) == "E104 1:1 unknown type 'Null'"
+  example r_node(r: p_type(ps: ps_of(text: "type List case A end List"), pos: 5)) == bare(kind: "t", text: "List", kids: [])
 do
   let t: Token = tok(ps: ps, i: pos)
   let name: Str = t_text(t: t)
   when
     t_kind(t: t) != "id" then expected(ps: ps, pos: pos, what: "a type", code: "E104")
     not in_table(table: builtin_types(), word: name) and not in_table(table: user_types(ps: ps), word: name) then fail_tok(t: t, code: "E104", message: "unknown type '" ++ name ++ "'")
-    in_table(table: " Option Result List Dict ", word: name) then type_arg(ps: ps, pos: pos, name: name)
+    in_table(table: " Option Result ", word: name) then type_arg(ps: ps, pos: pos, name: name)
+    in_table(table: " List Dict ", word: name) and not in_table(table: user_types(ps: ps), word: name) then type_arg(ps: ps, pos: pos, name: name)
     else ok(n: bare(kind: "t", text: name, kids: []), pos: pos + 1)
   end
 end
