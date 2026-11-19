@@ -87,6 +87,10 @@ npm test
 - 依存はゼロです。CodeQL・依存の脆弱性・Node の保守の確かめを CI で毎回回し、見つかったら PR を止めます。
 - 試作です。言語の決まりは、版が上がると変わることがあります。
 
+## エディタ
+
+VS Code の色分けは [editors/vscode](editors/vscode/README.md) にあります（フォルダを写すだけで使えます）。
+
 ## ライセンス
 
 [MIT](LICENSE)

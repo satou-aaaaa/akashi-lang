@@ -6,6 +6,7 @@ To write Akashi, read docs/SPEC.md first: it is the whole language in one short 
 
 ## Docs
 
+- [VS Code highlighting](editors/vscode/README.md): TextMate grammar, no dependencies
 - [Playground](https://satou-aaaaa.github.io/akashi-lang/): check, run, compile to Wasm and format in the browser
 
 - [Spec (paste into a prompt)](docs/SPEC.md): the complete language, short, in English
