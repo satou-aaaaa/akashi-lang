@@ -9,6 +9,7 @@ Node.js 22（`.nvmrc`）だけ。入れるものは無いので scripts/setup.sh
 ## push する前の確認
 
 ```bash
+node bin/akashi.js fmt <直した .ak>   # 書式（テストが、リポジトリの .ak と説明書きのコードが整っているかを見る）
 npm test
 ```
 

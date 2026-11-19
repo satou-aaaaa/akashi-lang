@@ -37,3 +37,18 @@ test('spec prints the short spec for prompts', () => {
   assert.equal(r.status, 0);
   assert.match(r.stdout, /^# Akashi language spec/);
 });
+
+test('fmt --check reports an unformatted file and leaves it unchanged', async () => {
+  const { mkdtempSync, writeFileSync, readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(join(tmpdir(), 'akashi-fmt-'));
+  const f = join(dir, 'a.ak');
+  writeFileSync(f, 'fn main(console:Console)->Unit do\nprint(to:console,value:1)\nend\n');
+  const r = cli('fmt', '--check', f);
+  assert.equal(r.status, 1);
+  assert.match(readFileSync(f, 'utf8'), /console:Console/);
+  assert.equal(cli('fmt', f).status, 0);
+  assert.equal(readFileSync(f, 'utf8'), 'fn main(console: Console) -> Unit do\n  print(to: console, value: 1)\nend\n');
+  assert.equal(cli('fmt', '--check', f).status, 0);
+});

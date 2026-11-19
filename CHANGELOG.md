@@ -6,6 +6,8 @@
 ## 0.6.0 — 2026-11-19
 
 ### 足した
+- `akashi fmt`：書式を決まった形に整える（意味は変えない・2回かけても同じ、をテストで確かめる）。
+- ライセンスを MIT にした。
 - コンパイラ（段階1）：`akashi build` で WebAssembly（WASI のコマンド）に0から書き出す。`akashi wasm` で動かす。Int・Bool・Str・Unit・関数・再帰・let・if・when・requires・ensures・print・to_str・str_len。ほかは E600。
 - インタプリタとコンパイラの答えを比べるテスト（見本と、自動で作った式 300 個）。
 - 使う道具の決まり：依存ゼロをテストで守る。CodeQL の指摘・保守切れの Node・脆弱な依存で CI を止める。Dependabot。

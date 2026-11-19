@@ -4,6 +4,7 @@
   "description": "Akashi: a small programming language designed to be written by LLMs",
   "type": "module",
   "private": true,
+  "license": "MIT",
   "bin": { "akashi": "bin/akashi.js" },
   "scripts": {
     "test": "node --test test/*.test.js"

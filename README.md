@@ -58,6 +58,7 @@ node bin/akashi.js check examples/bad/e210-missing-case.ak    # わざと間違�
 node bin/akashi.js run examples/read_file.ak --allow-read examples/files   # 読んでよいフォルダを1つ渡す
 node bin/akashi.js build examples/gcd.ak -o gcd.wasm         # WebAssembly にコンパイル（0から書き出す。段階1）
 node bin/akashi.js wasm gcd.wasm                              # コンパイルしたものを動かす
+node bin/akashi.js fmt examples/types.ak                      # 書式を整える
 node bin/akashi.js spec                                       # AI に貼る短い仕様
 npm test
 ```
@@ -81,6 +82,10 @@ npm test
 - まだ無い：小数、ファイルの書き込み・通信、部品（モジュール）、並行処理。コンパイラはリスト・型がまだ（段階2）。
 - 依存はゼロです。CodeQL・依存の脆弱性・Node の保守の確かめを CI で毎回回し、見つかったら PR を止めます。
 - 試作です。言語の決まりは、版が上がると変わることがあります。
+
+## ライセンス
+
+[MIT](LICENSE)
 
 ## 開発する人へ
 
