@@ -16,6 +16,7 @@ Every diagnostic has `code`, `message`, `line`, `col` and `fix` (what to write i
 | [E106](#e106) | chained comparison |
 | [E107](#e107) | if without else |
 | [E108](#e108) | extra end |
+| [E112](#e112) | when without else |
 | [E200](#e200) | unknown name |
 | [E201](#e201) | type mismatch |
 | [E202](#e202) | wrong arguments |
@@ -44,6 +45,8 @@ Every diagnostic has `code`, `message`, `line`, `col` and `fix` (what to write i
 | [R508](#r508) | file not readable |
 | [R509](#r509) | capability not granted |
 | [R510](#r510) | template holes and values do not match |
+| [R511](#r511) | ensures fails for a generated input |
+| [R512](#r512) | crash on a generated input that satisfies requires |
 
 ## E100
 
@@ -150,6 +153,22 @@ end
 
 - message: extra 'end'
 - fix: every if ... then ... else ... end and every fn ... do ... end needs exactly one end. An else if is a new if inside else, so it needs its own end too: count one end per if
+
+## E112
+
+when without else.
+
+```
+fn size(n: Int) -> Str ensures true example size(n: 1) == "small" do
+  when
+    n < 10 then "small"
+    n < 100 then "medium"
+  end
+end
+```
+
+- message: 'when' has no 'else'
+- fix: end every when with an else line: else <value>
 
 ## E200
 
@@ -367,12 +386,16 @@ fn main(console: Console) -> Unit do print(to: console, value: half(n: 3)) end
 ensures failed.
 
 ```
-fn abs(x: Int) -> Int ensures result >= 0 example abs(x: 0) == 0 do x end
-fn main(console: Console) -> Unit do print(to: console, value: abs(x: -5)) end
+# (functions with capabilities are not tried with generated inputs, so this one is only caught while running)
+fn report_abs(console: Console, x: Int) -> Int ensures result >= 0 do
+  print(to: console, value: x)
+  x
+end
+fn main(console: Console) -> Unit do print(to: console, value: report_abs(console: console, x: -5)) end
 ```
 
-- message: ensures of 'abs' failed: result >= 0 (result=-5, x=-5)
-- fix: the body of abs breaks its promise; fix the body (or the ensures if the promise is wrong)
+- message: ensures of 'report_abs' failed: result >= 0 (result=-5, console=<Console>, x=-5)
+- fix: the body of report_abs breaks its promise; fix the body (or the ensures if the promise is wrong)
 
 ## R502
 
@@ -405,8 +428,8 @@ integer overflow.
 recursion too deep.
 
 ```
-fn loop(n: Int) -> Int ensures true example loop(n: 0) == 0 do if n == 0 then 0 else loop(n: n + 1) end end
-fn main(console: Console) -> Unit do print(to: console, value: loop(n: 1)) end
+fn loop(console: Console, n: Int) -> Int do if n == 0 then 0 else loop(console: console, n: n + 1) end end
+fn main(console: Console) -> Unit do print(to: console, value: loop(console: console, n: 1)) end
 ```
 
 - message: recursion deeper than 500 calls in 'loop'
@@ -477,3 +500,35 @@ end
 
 - message: the template has 1 hole(s) '{}' but 2 value(s) were given
 - fix: give exactly one value per '{}'
+
+## R511
+
+ensures fails for a generated input.
+
+```
+fn abs(x: Int) -> Int
+  ensures result >= 0
+  example abs(x: 3) == 3
+do
+  x
+end
+```
+
+- message: abs(x: -1) is a valid input (no requires) but breaks ensures: result >= 0 (result=-1, x=-1)
+- fix: fix the body of abs for this input, or add requires that excludes it, or correct the ensures. Add it as an example: example abs(x: -1) == ...
+
+## R512
+
+crash on a generated input that satisfies requires.
+
+```
+fn per_item(total: Int, count: Int) -> Int
+  ensures true
+  example per_item(total: 10, count: 2) == 5
+do
+  total / count
+end
+```
+
+- message: per_item(total: 0, count: 0) is a valid input (no requires) but fails: R503 division by zero
+- fix: handle this input in per_item (e.g. an if for it), or add a requires that excludes it

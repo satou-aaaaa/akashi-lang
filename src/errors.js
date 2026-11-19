@@ -11,6 +11,7 @@ export const CODES = {
   E106: 'chained comparison',
   E107: 'if without else',
   E108: 'extra end',
+  E112: 'when without else',
   E200: 'unknown name',
   E201: 'type mismatch',
   E202: 'wrong arguments',
@@ -39,6 +40,8 @@ export const CODES = {
   R508: 'file not readable',
   R509: 'capability not granted',
   R510: 'template holes and values do not match',
+  R511: 'ensures fails for a generated input',
+  R512: 'crash on a generated input that satisfies requires',
 };
 
 // もう出さないコード（意味は変えず、番号を使い回さない）

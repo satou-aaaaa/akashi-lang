@@ -10,6 +10,7 @@ const escapeHtml = (x) => x.replace(/[&<>"']/g, (c) => ESC[c]);
 
 export function show(v, nested = false) {
   if (v === null) return '()';
+  if (v && v.cap) return `<${v.cap}>`;
   if (v && v.html !== undefined) return v.html;
   if (v && v.sql !== undefined) return `${v.sql} -- params: ${JSON.stringify(v.params)}`;
   if (Array.isArray(v)) return `[${v.map((x) => show(x, true)).join(', ')}]`;
@@ -22,6 +23,9 @@ function equal(a, b) {
   if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => equal(x, b[i]));
   return a === b;
 }
+
+// 自動で作った入力で試すとき、長くかかる回は打ち切って数えない
+export class OutOfBudget extends Error {}
 
 export class Machine {
   constructor(program, out = (s) => process.stdout.write(s)) {
@@ -137,6 +141,7 @@ export class Machine {
   }
 
   eval(e, env) {
+    if (this.budget !== undefined && --this.budget < 0) throw new OutOfBudget();
     switch (e.k) {
       case 'int': return this.int(e.v, e.pos);
       case 'str': case 'bool': return e.v;

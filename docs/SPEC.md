@@ -1,4 +1,4 @@
-# Akashi language spec (v0.3)
+# Akashi language spec (v0.4)
 
 Paste this whole file into an LLM prompt to teach it Akashi. It is short on purpose.
 
@@ -7,7 +7,7 @@ Paste this whole file into an LLM prompt to teach it Akashi. It is short on purp
 1. **One way to write each thing.** No loops (use recursion, `range`, `map`, `filter`, `fold`), no methods, no operator overloading, no implicit conversion.
 2. **Everything is checked before running.** Types, names, arguments, capabilities and contracts are checked by `akashi check`.
 3. **Every error says how to fix it.** Each diagnostic has a stable code, a position and a `fix` text. See `docs/ERRORS.md`.
-4. **Promises are code.** Pure functions must state `ensures` (a promise about `result`) and at least one `example`. Examples run on every `check`.
+4. **Promises are code.** Pure functions must state `ensures` (a promise about `result`) and at least one `example`. Examples run on every `check`. Then `check` also calls every pure function with many generated inputs that satisfy `requires`; a broken `ensures` (R511) or a crash (R512) is reported with the smallest such input.
 5. **No ambient authority.** A function can touch the outside world (screen, files) only through a capability it was given as a parameter. Only `main` receives capabilities, from the runtime; nobody can create one.
 6. **Outside text never changes the shape of HTML or SQL.** `Html` and `Sql` are built only from a literal template plus values (see below).
 
@@ -87,7 +87,18 @@ area(h: 4, w: 3)        # E207
 | join (Str or List) | `"a" ++ "b"`, `[1] ++ [2]` |
 | compare | `== !=` (any type, same on both sides), `< <= > >=` (Int) |
 | logic | `and`, `or`, `not`. Mixing `and` with `or` needs parentheses. Comparisons cannot be chained: write `0 <= x and x < 10` |
-| if | `if c then a else b end`; `else` is required; every `if` has its own `end`, so `if a then x else if b then y else z end end` |
+| if | `if c then a else b end`; `else` is required; every `if` has its own `end` |
+| when | several cases with one `end` (prefer this over nested if): `when` / `cond then value` lines / `else value` / `end`. The first true line wins |
+
+Example of `when`:
+
+```
+when
+  n % 15 == 0 then "FizzBuzz"
+  n % 3 == 0 then "Fizz"
+  else to_str(value: n)
+end
+```
 
 ## Built-in functions
 

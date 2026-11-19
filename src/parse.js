@@ -3,7 +3,7 @@
 import { AkashiError, diag, suggest } from './errors.js';
 
 const KEYWORDS = new Set([
-  'fn', 'do', 'end', 'let', 'if', 'then', 'else',
+  'fn', 'do', 'end', 'let', 'if', 'then', 'else', 'when',
   'requires', 'ensures', 'example', 'effects',
   'and', 'or', 'not', 'true', 'false',
 ]);
@@ -300,6 +300,27 @@ class Parser {
       }
       this.expectOp(']', 'close the list with ]');
       return { k: 'list', items, pos: tok.pos };
+    }
+    // when：いくつもの場合分けを end 1つで書く。上から順に調べ、最後は else
+    if (this.isKw('when')) {
+      this.next();
+      const arms = [];
+      while (!this.isKw('else')) {
+        if (this.isKw('end')) {
+          throw new AkashiError(diag('E112', "'when' has no 'else'", this.peek().pos, 'end every when with an else line: else <value>'));
+        }
+        const cond = this.expr();
+        this.expectKw('then', 'each line of when is: condition then value');
+        arms.push({ cond, value: this.expr() });
+      }
+      if (arms.length === 0) this.fail('a condition', 'write at least one line: condition then value');
+      this.next();
+      let result = this.expr();
+      this.expectKw('end', 'close the when with end (after the else line)');
+      for (const arm of arms.reverse()) {
+        result = { k: 'if', cond: arm.cond, thenB: { lets: [], result: arm.value }, elseB: { lets: [], result }, pos: arm.cond.pos };
+      }
+      return result;
     }
     if (this.isKw('if')) {
       this.next();

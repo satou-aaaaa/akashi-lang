@@ -4,6 +4,7 @@ import { parse } from './parse.js';
 import { check } from './check.js';
 import { realpathSync } from 'node:fs';
 import { Machine } from './run.js';
+import { fuzz } from './fuzz.js';
 
 function catchAkashi(fn) {
   try {
@@ -26,7 +27,7 @@ export function analyze(src) {
 // 検査＋全部の example を回す。{ ok, diagnostics, examples: { passed, total } }
 export function checkSource(src) {
   const a = analyze(src);
-  if (!a.ok) return { ok: false, diagnostics: a.diagnostics, examples: { passed: 0, total: 0 } };
+  if (!a.ok) return { ok: false, diagnostics: a.diagnostics, examples: { passed: 0, total: 0 }, generated: 0 };
   const m = new Machine(a.program, () => {});
   const diagnostics = [];
   let passed = 0;
@@ -39,7 +40,10 @@ export function checkSource(src) {
       else passed++;
     }
   }
-  return { ok: diagnostics.length === 0, diagnostics, examples: { passed, total } };
+  // example が通ったら、自動で作った入力でも ensures が守られるかを試す
+  const fz = diagnostics.length === 0 ? fuzz(a.program) : { diagnostics: [], checked: 0 };
+  diagnostics.push(...fz.diagnostics);
+  return { ok: diagnostics.length === 0, diagnostics, examples: { passed, total }, generated: fz.checked };
 }
 
 // 検査（example も）が通ったら main を動かす。{ ok, diagnostics, output }

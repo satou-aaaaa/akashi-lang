@@ -33,6 +33,6 @@ if (json) {
   console.log(JSON.stringify({ ...res, file }, null, 2));
 } else {
   for (const d of res.diagnostics) console.error(formatDiag(d, file));
-  if (cmd === 'check' && res.ok) console.log(`ok: ${res.examples.passed}/${res.examples.total} examples passed`);
+  if (cmd === 'check' && res.ok) console.log(`ok: ${res.examples.passed}/${res.examples.total} examples passed, ${res.generated} generated inputs kept every ensures`);
 }
 process.exit(res.ok ? 0 : 1);
