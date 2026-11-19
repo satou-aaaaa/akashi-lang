@@ -24,14 +24,15 @@ wasmtime gcd.wasm                                      # wasmtime など、ほ�
 - まだ扱えない書き方を使うと **E600** になります。そのプログラムは `akashi run`（インタプリタ）で動かしてください。
 - 終わりのコードは、通れば 0、実行時のエラーなら 1 です。エラーの文は標準エラーに `行:列: 番号 説明` の形で出ます。
 
-### 今（段階2の途中）扱えるもの
+### 今（段階2）扱えるもの
 
 | 扱える | まだ扱えない（E600） |
 | --- | --- |
-| Int・Bool・Str・Unit・List・Option・Result・自分で作る型 | Html・Sql |
-| 関数・再帰・let・if・when・match | 関数を値として let に入れる・引数で受け取る |
-| requires・ensures（毎回確かめる） | Folder（ファイルを読む） |
-| print・to_str・str_len・parse_int・trim | chars・split・join・contains・starts_with・ends_with・lines |
+| Int・Bool・Str・Unit・List・Option・Result・自分で作る型・Html・Sql | 関数を値として let に入れる・引数で受け取る |
+| 関数・再帰・let・if・when・match | Folder（ファイルを読む。段階3） |
+| requires・ensures（毎回確かめる） | |
+| print・to_str・str_len・parse_int・trim・chars・split・join・contains・starts_with・ends_with・lines | |
+| html・html_text・html_join・sql（穴の数は R510 で確かめる） | |
 | len・get・at・range・append・map・filter・fold・find・any・all・reverse・take・drop・sort・sum・max・min | |
 | `+ - * / %`・比較（`==` は中身まで）・`and or not`・`++`（Str・List） | |
 
@@ -44,7 +45,7 @@ wasmtime gcd.wasm                                      # wasmtime など、ほ�
        (src/parse.js)           (src/check.js ほか)                       (バイト列を直接書く)
 ```
 
-- **値の表し方**：Int は 64 ビット整数（i64）、Bool は 0/1（i32）、Str はメモリ上の「長さ（4バイト）＋UTF-8 のバイト」の先頭の場所（i32）、Unit は値なし。
+- **値の表し方**（Html は Str と同じ形、Sql は「型紙の文字＋値のリスト」）：Int は 64 ビット整数（i64）、Bool は 0/1（i32）、Str はメモリ上の「長さ（4バイト）＋UTF-8 のバイト」の先頭の場所（i32）、Unit は値なし。
   - List は「長さ（4バイト）＋すき間（4バイト）＋要素を 8 バイトずつ」の先頭の場所（i32）。要素の型によらず 8 バイトにそろえるので、どの型のリストも同じ形で扱えます。
   - 型の値（Option・Result・自分で作る型）は「case の番号（4バイト）＋すき間（4バイト）＋欄を 8 バイトずつ」の先頭の場所（i32）。欄の無い case（`None`・`Dot` など）は、データの節に1つだけ置いて使い回します。
   - 表示（print・to_str）と比べる（`==`）は、型ごとに WebAssembly の関数を作ります（使った型の分だけ）。
@@ -60,7 +61,7 @@ wasmtime gcd.wasm                                      # wasmtime など、ほ�
 意味の正はインタプリタ（`src/run.js`）です。コンパイラはそれと**同じ答え**を出さなければいけません。`test/compile.test.js` が毎回比べます。
 
 1. `examples/*.ak` と `test/compile/*.ak` を、インタプリタとコンパイラの両方で動かし、**出力・終わりのコード・エラー番号**が一致するかを比べる。`test/compile/` には、あふれ・0 割り・requires と ensures の破れ・深すぎる再帰・リストの範囲の外・大きすぎる range、入れ子の型・木の型・文字のくくり（`"` `\\` 改行）・数の読み取り（全角の空白・大きすぎる数）など、境目の見本を置いている。
-2. **自動で作った式 300 個**（大きな数・負の数・0 割りを含む）と、**自動で作ったリストの式 200 個**（reverse・take・drop・sort・append・++・map・filter を重ねたもの。範囲の外・負の数・あふれを含む）を両方で動かして比べる（差分テスト）。種は固定なので、毎回同じ式で試す。
+2. **自動で作った式 300 個**（大きな数・負の数・0 割りを含む）と、**自動で作ったリストの式 200 個**（reverse・take・drop・sort・append・++・map・filter を重ねたもの。範囲の外・負の数・あふれを含む）、**自動で作った文字の式 200 個**（split・join・trim・chars・lines・html_text を重ねたもの。空・絵文字・改行・" を含む）を両方で動かして比べる（差分テスト）。種は固定なので、毎回同じ式で試す。
 3. できた `.wasm` が正しい WebAssembly か（`WebAssembly.validate`）、取り込みが2つだけかを確かめる。
 4. `test/compile/` の見本がコンパイルできなくなったら落とす（黙って E600 で飛ばさない）。
 
@@ -83,7 +84,7 @@ wasmtime gcd.wasm                                      # wasmtime など、ほ�
 | 段階 | やること | 終わりの目印 |
 | --- | --- | --- |
 | 1（済み） | Int・Bool・Str・関数・if・約束を、WebAssembly に0から書き出す。インタプリタとの差分テスト | `examples/` のうち、リストを使わないものが全部同じ答え |
-| 2（途中） | List・Option・Result・自分で作る型・match・リストの関数（済み）。文字の関数・Html/Sql（これから）。値は線形メモリに置く | `examples/` の全部（ファイル以外）が同じ答え |
+| 2（済み） | List・Option・Result・自分で作る型・match・リストの関数・文字の関数・Html/Sql。値は線形メモリに置く | `examples/` の全部（ファイル以外）が同じ答え |
 | 3 | Folder（WASI の `path_open`。渡したフォルダだけを開ける）。末尾呼び出し（`return_call`）で長い再帰 | `read_file.ak` が wasmtime の `--dir` で動く |
 | 4 | コンパイラを書くのに要る道具を言語に足す：文字を1文字ずつ見る・切り出す、バイトの並び（Bytes）、辞書（名前→値）、ファイルに書く鍵、複数のファイル（部品） | 字句解析を Akashi で書ける |
 | 5 | Akashi でコンパイラを書く（`compiler/*.ak`）。今の JS のコンパイラ（段階0）でそれをコンパイルして `akashic.wasm`（段階1）を作る | `akashic.wasm` が `examples/` を正しくコンパイルする |
