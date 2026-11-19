@@ -3,29 +3,33 @@
 // 見本：examples/*.ak のうちコンパイルできるもの、test/compile/*.ak、自動で作った式。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, writeFileSync, symlinkSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { runSource, buildSource, analyze, CODES } from '../src/index.js';
 import { runWasm } from '../src/host.js';
+import { openFolder } from '../src/folder.js';
 
-function viaInterpreter(src) {
-  const r = runSource(src);
+function viaInterpreter(src, folder) {
+  const r = runSource(src, { grants: { folder } });
   return { out: r.output, exit: r.ok ? 0 : 1, code: r.ok ? null : r.diagnostics[0].code };
 }
 
-function viaWasm(src) {
+function viaWasm(src, folder) {
   const b = buildSource(src);
   if (!b.ok) return { unsupported: b.diagnostics[0] };
   assert.ok(WebAssembly.validate(b.bytes), 'the module is valid WebAssembly');
   let out = '';
   let err = '';
-  const exit = runWasm(b.bytes, { stdout: (s) => { out += s; }, stderr: (s) => { err += s; } });
+  const exit = runWasm(b.bytes, { stdout: (s) => { out += s; }, stderr: (s) => { err += s; }, folder: folder ? openFolder(folder) : undefined });
   return { out, exit, code: err.match(/\b([ER]\d{3})\b/)?.[1] ?? null, err };
 }
 
-const same = (src, label) => {
-  const w = viaWasm(src);
+const same = (src, label, folder) => {
+  const w = viaWasm(src, folder);
   if (w.unsupported) return false;
-  const i = viaInterpreter(src);
+  const i = viaInterpreter(src, folder);
   assert.deepEqual({ out: w.out, exit: w.exit, code: w.code }, i, `${label}\n${w.err ?? ''}`);
   return true;
 };
@@ -35,9 +39,9 @@ let compiled = 0;
 for (const dir of dirs) {
   for (const f of readdirSync(dir).filter((x) => x.endsWith('.ak'))) {
     const src = readFileSync(new URL(f, dir), 'utf8');
-    if (/^# grant:/m.test(src)) continue;
+    const grant = src.match(/^# grant: (.+)$/m)?.[1];
     test(`wasm and interpreter agree: ${f}`, () => {
-      if (same(src, f)) compiled++;
+      if (same(src, f, grant && fileURLToPath(new URL(`../${grant}`, import.meta.url)))) compiled++;
       else assert.ok(!dir.href.endsWith('/compile/'), `${f} in test/compile must be supported by the compiler`);
     });
   }
@@ -48,7 +52,7 @@ test('hello and gcd compile (the compiler is not silently skipping everything)',
 });
 
 test('unsupported features give E600 with a position and a fix', () => {
-  const b = buildSource('fn main(console: Console, folder: Folder) -> Unit do print(to: console, value: 1) end');
+  const b = buildSource('fn dbl(x: Int) -> Int\n  ensures true\n  example dbl(x: 1) == 2\ndo\n  x * 2\nend\n\nfn main(console: Console) -> Unit do\n  print(to: console, value: dbl)\nend\n');
   assert.equal(b.ok, false);
   assert.equal(b.diagnostics[0].code, 'E600');
   assert.ok(b.diagnostics[0].line > 0 && b.diagnostics[0].fix.length > 10);
@@ -166,4 +170,62 @@ test('generated text expressions give the same result (200 programs)', () => {
     if (analyze(src).diagnostics.length) continue;
     assert.ok(same(src, e), `not compiled: ${e}\n${JSON.stringify(viaWasm(src).unsupported)}`);
   }
+});
+
+// ファイルを読む（段階3）：渡したフォルダの中だけ。外へのリンク・.. ・渡していないときは止まる。読めないものは Err
+test('reading files agrees with the interpreter, including links out, folders, bad UTF-8 and a BOM', () => {
+  const root = mkdtempSync(join(tmpdir(), 'akashi-'));
+  const inside = join(root, 'in');
+  mkdirSync(inside);
+  mkdirSync(join(inside, 'sub'));
+  writeFileSync(join(root, 'secret.txt'), 'secret');
+  writeFileSync(join(inside, 'a.txt'), 'line 1\r\nline 2\n');
+  writeFileSync(join(inside, 'sub', 'b.txt'), 'あい😀');
+  writeFileSync(join(inside, 'bom.txt'), Buffer.from([0xef, 0xbb, 0xbf, 0x68, 0x69]));
+  writeFileSync(join(inside, 'bad.txt'), Buffer.from([0x61, 0xc0, 0xaf]));
+  writeFileSync(join(inside, 'surrogate.txt'), Buffer.from([0xed, 0xa0, 0x80]));
+  writeFileSync(join(inside, 'big.txt'), 'x'.repeat(200000));
+  symlinkSync(join(root, 'secret.txt'), join(inside, 'link.txt'));
+  symlinkSync(join(inside, 'a.txt'), join(inside, 'ok-link.txt'));
+  const prog = (path) => `fn main(console: Console, folder: Folder) -> Unit do
+  match read_text(from: folder, path: "${path}")
+    case Ok(value: t) then print(to: console, value: if str_len(text: t) > 50 then to_str(value: str_len(text: t)) else t end)
+    case Err(message: m) then print(to: console, value: "Err " ++ m)
+  end
+end`;
+  const paths = ['a.txt', 'sub/b.txt', 'bom.txt', 'bad.txt', 'surrogate.txt', 'big.txt', 'nothing.txt', 'sub', 'ok-link.txt', 'link.txt',
+    '../secret.txt', 'sub/../a.txt', '/etc/passwd', 'C:x', '', 'a\\\\b', './a.txt', 'sub/./b.txt', '..x/a', 'x..'];
+  const codes = [];
+  for (const p of paths) {
+    assert.ok(same(prog(p), p, inside), `not compiled: ${p}`);
+    codes.push(viaInterpreter(prog(p), inside).code);
+  }
+  assert.ok(codes.filter((c) => c === 'R507').length >= 5, 'paths that leave the folder stop with R507');
+  // 渡していないときは R509（遊べるページと同じ）
+  assert.equal(viaWasm(prog('a.txt')).code, 'R509');
+  assert.equal(viaInterpreter(prog('a.txt')).code, 'R509');
+});
+
+test('a program that reads files imports only the five reading functions, and asks only for the read right', () => {
+  const b = buildSource(readFileSync(new URL('../examples/read_file.ak', import.meta.url), 'utf8'));
+  const imports = WebAssembly.Module.imports(new WebAssembly.Module(b.bytes)).map((x) => x.name);
+  assert.deepEqual(imports, ['fd_write', 'proc_exit', 'fd_prestat_get', 'path_open', 'fd_filestat_get', 'fd_read', 'fd_close']);
+});
+
+// 自分の受け皿（src/host.js）だけでなく、ほかの WASI の実装（Node の node:wasi。中身は uvwasi）でも同じに動くか。
+// 受け皿がゆるすぎて、本物の WASI では動かない（権利が足りない など）ことを見逃さないため
+test('compiled file reading also works on another WASI implementation (node:wasi)', async () => {
+  const { WASI } = await import('node:wasi');
+  const { openSync, closeSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'akashi-wasi-'));
+  const outPath = join(dir, 'out.txt');
+  const files = fileURLToPath(new URL('../examples/files', import.meta.url));
+  const src = readFileSync(new URL('../examples/read_file.ak', import.meta.url), 'utf8');
+  const fd = openSync(outPath, 'w');
+  const wasi = new WASI({ version: 'preview1', args: [], env: {}, preopens: { '.': files }, stdout: fd, returnOnExit: true });
+  const instance = await WebAssembly.instantiate(new WebAssembly.Module(buildSource(src).bytes), wasi.getImportObject());
+  const exit = wasi.start(instance);
+  closeSync(fd);
+  assert.equal(exit, 0);
+  assert.equal(readFileSync(outPath, 'utf8'), viaInterpreter(src, files).out);
 });

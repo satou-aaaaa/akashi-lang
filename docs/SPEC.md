@@ -208,8 +208,8 @@ end
 ```
 node bin/akashi.js check file.ak [--json]   # types, names, capabilities, contracts, generated inputs, and all examples
 node bin/akashi.js run file.ak [--json] [--allow-read <folder>]   # check, then run main (requires/ensures are checked on every call)
-node bin/akashi.js build file.ak [-o out.wasm]   # compile to WebAssembly (all but Folder and functions kept in let or parameters; those give E600)
-node bin/akashi.js wasm out.wasm            # run a compiled program
+node bin/akashi.js build file.ak [-o out.wasm]   # compile to WebAssembly (all but functions kept in let or parameters, which give E600)
+node bin/akashi.js wasm out.wasm [--allow-read <folder>]   # run a compiled program
 node bin/akashi.js fmt file.ak [--check]    # format: 2-space indent, standard spacing (keeps line breaks and comments)
 node bin/akashi.js spec                     # print this spec (to paste into a prompt)
 ```

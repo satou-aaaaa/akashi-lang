@@ -17,19 +17,23 @@ Akashi のプログラムを **WebAssembly**（`.wasm`）に変えるコンパ�
 ```bash
 node bin/akashi.js build examples/gcd.ak -o gcd.wasm   # 検査（見本・自動の試しも）が通ったら .wasm を書き出す
 node bin/akashi.js wasm gcd.wasm                       # 動かす（渡すのは画面と標準エラーだけ）
+node bin/akashi.js build examples/read_file.ak -o r.wasm
+node bin/akashi.js wasm r.wasm --allow-read examples/files   # 読んでよいフォルダを1つ渡す
 wasmtime gcd.wasm                                      # wasmtime など、ほかの WASI の実行環境でも動く
+wasmtime --dir examples/files::. r.wasm                # フォルダは最初に開けたもの（fd 3）として渡す
 ```
 
 - `build` は、`check` が通ったプログラムだけをコンパイルします。
 - まだ扱えない書き方を使うと **E600** になります。そのプログラムは `akashi run`（インタプリタ）で動かしてください。
 - 終わりのコードは、通れば 0、実行時のエラーなら 1 です。エラーの文は標準エラーに `行:列: 番号 説明` の形で出ます。
 
-### 今（段階2）扱えるもの
+### 今（段階3）扱えるもの
 
 | 扱える | まだ扱えない（E600） |
 | --- | --- |
-| Int・Bool・Str・Unit・List・Option・Result・自分で作る型・Html・Sql | 関数を値として let に入れる・引数で受け取る |
-| 関数・再帰・let・if・when・match | Folder（ファイルを読む。段階3） |
+| Int・Bool・Str・Unit・List・Option・Result・自分で作る型・Html・Sql | 関数を値として let に入れる・引数で受け取る・表示する |
+| 関数・再帰・let・if・when・match | |
+| Folder と read_text（渡したフォルダの中だけ。段階3） | |
 | requires・ensures（毎回確かめる） | |
 | print・to_str・str_len・parse_int・trim・chars・split・join・contains・starts_with・ends_with・lines | |
 | html・html_text・html_join・sql（穴の数は R510 で確かめる） | |
@@ -51,7 +55,12 @@ wasmtime gcd.wasm                                      # wasmtime など、ほ�
   - 表示（print・to_str）と比べる（`==`）は、型ごとに WebAssembly の関数を作ります（使った型の分だけ）。
 - **メモリは増える一方**：今は、使い終わった値を片付けません（ごみ集めをしない）。プログラムは短く終わる前提です。
 - **鍵（Console）は消える**：鍵の使い方は検査で確かめ終わっているので、実行時には何も渡しません。
-- **外とのつながりは2つだけ**：WASI の `fd_write`（画面と標準エラーに書く）と `proc_exit`（終わる）だけを取り込みます。ファイル・時計・乱数・通信は取り込まないので、コンパイルしたプログラムはそれらに触れません（テストが取り込みの一覧を確かめます）。
+- **外とのつながりは最小**：ふつうは WASI の `fd_write`（画面と標準エラーに書く）と `proc_exit`（終わる）の2つだけを取り込みます。時計・乱数・通信は取り込まないので、コンパイルしたプログラムはそれらに触れません（テストが取り込みの一覧を確かめます）。
+- **ファイルを読むときだけ5つ足す**：`main` が Folder を受け取るときだけ、`fd_prestat_get`・`path_open`・`fd_filestat_get`・`fd_read`・`fd_close` を取り込みます。
+  - 読むフォルダは、実行する側が最初に開けて渡したもの（fd 3）だけです。始めに fd 3 があるかを確かめ、無ければ R509 で止まります（インタプリタの `--allow-read` 無しと同じ）。
+  - `path_open` では読む権利（`fd_read`・`fd_filestat_get`）だけを頼みます。書く・作る・消す権利は頼みません。受け皿（`src/host.js`）も、それ以外を頼まれたら断ります。
+  - `..`・絶対パス・`C:`・`\`・空のパスは、開ける前に R507 で止めます。フォルダの外を指すリンクは、実行する側が断る（ENOTCAPABLE）ので、それも R507 にします。
+  - 正しい UTF-8 かを確かめ、先頭の BOM を落とします（インタプリタの TextDecoder と同じ）。読めないものは `Err` です。
 - **実行時の部品**も WebAssembly で書いています（`src/wasm.js` の `helpers`）：メモリの確保、文字の連結・比較・長さ、数を文字にする、あふれの確かめ、かけ算のあふれの確かめ、呼び出しの深さ、エラーで止める。
 - **インタプリタと同じ意味**にそろえています：Int は ±9007199254740991 を超えたら R504、0 で割ったら R503、再帰は 500 段まで（R505）、requires（R500）・ensures（R501）は毎回確かめる。
 - バイナリの形は WebAssembly の仕様書の「Binary Format」の章のとおりです（型・取り込み・関数・メモリ・大域変数・書き出し・コード・データの各節）。
@@ -85,7 +94,7 @@ wasmtime gcd.wasm                                      # wasmtime など、ほ�
 | --- | --- | --- |
 | 1（済み） | Int・Bool・Str・関数・if・約束を、WebAssembly に0から書き出す。インタプリタとの差分テスト | `examples/` のうち、リストを使わないものが全部同じ答え |
 | 2（済み） | List・Option・Result・自分で作る型・match・リストの関数・文字の関数・Html/Sql。値は線形メモリに置く | `examples/` の全部（ファイル以外）が同じ答え |
-| 3 | Folder（WASI の `path_open`。渡したフォルダだけを開ける）。末尾呼び出し（`return_call`）で長い再帰 | `read_file.ak` が wasmtime の `--dir` で動く |
+| 3（済み） | Folder（WASI の `path_open`。渡したフォルダだけを開ける）。自分の受け皿と、もう1つの WASI の実装（Node の node:wasi）の両方で確かめる。末尾呼び出し（`return_call`）は見送った（インタプリタの再帰の上限 500 と答えをそろえるため。長いくり返しは range と fold で書く） | `read_file.ak` が WASI の実行環境で、渡したフォルダだけを読んで動く |
 | 4 | コンパイラを書くのに要る道具を言語に足す：文字を1文字ずつ見る・切り出す、バイトの並び（Bytes）、辞書（名前→値）、ファイルに書く鍵、複数のファイル（部品） | 字句解析を Akashi で書ける |
 | 5 | Akashi でコンパイラを書く（`compiler/*.ak`）。今の JS のコンパイラ（段階0）でそれをコンパイルして `akashic.wasm`（段階1）を作る | `akashic.wasm` が `examples/` を正しくコンパイルする |
 | 6 | `akashic.wasm` で自分をコンパイルして段階2を作り、段階1と**1バイトも違わない**ことを確かめる（不動点） | テストで毎回確かめる。JS のコンパイラは「種」として残し、別の道で作った結果と比べる（[11]） |

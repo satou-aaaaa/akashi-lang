@@ -76,7 +76,8 @@ class Unsupported extends Error {
 
 const LIST_BUILTINS = ['len', 'get', 'at', 'range', 'append', 'map', 'filter', 'fold', 'find', 'any', 'all', 'reverse', 'take', 'drop', 'sort', 'sum', 'max', 'min'];
 const TEXT_BUILTINS = ['chars', 'split', 'join', 'contains', 'starts_with', 'ends_with', 'lines', 'html', 'html_text', 'html_join', 'sql'];
-const SUPPORTED_BUILTINS = ['print', 'to_str', 'str_len', 'parse_int', 'trim', ...LIST_BUILTINS, ...TEXT_BUILTINS];
+const CAPS = ['Console', 'Folder']; // 鍵。実行時には何も渡さない（Folder は WASI の fd 3）
+const SUPPORTED_BUILTINS = ['print', 'to_str', 'str_len', 'parse_int', 'trim', 'read_text', ...LIST_BUILTINS, ...TEXT_BUILTINS];
 
 function valType(t) {
   t = prune(t);
@@ -148,7 +149,8 @@ class Compiler {
     const p = this.program;
     const main = p.fns.find((f) => f.name === 'main');
     if (!main) throw new Unsupported('a program without main', { line: 1, col: 1 });
-    for (const prm of main.params) if (prm.type.k !== 'Console') throw new Unsupported(`the capability ${prm.type.k}`, prm.pos);
+    for (const prm of main.params) if (!CAPS.includes(prm.type.k)) throw new Unsupported(`the parameter ${prm.name} of main`, prm.pos);
+    const folder = main.params.find((x) => x.type.k === 'Folder');
 
     // 関数の番号：0..1 は取り込み、続いて手伝いの関数、続いて利用者の関数、最後に _start
     this.types = [];
@@ -163,6 +165,20 @@ class Compiler {
       { mod: 'wasi_snapshot_preview1', name: 'proc_exit', type: typeIndex([I32], []) },
     ];
     const IMP = { fdWrite: 0, procExit: 1 };
+    // ファイルを読むのは、main が Folder を受け取るときだけ。そのときも、読むための5つだけを取り込む
+    if (folder) {
+      for (const [key, nm, params] of [
+        ['prestat', 'fd_prestat_get', [I32, I32]],
+        ['pathOpen', 'path_open', [I32, I32, I32, I32, I32, I64, I64, I32, I32]],
+        ['fdFilestat', 'fd_filestat_get', [I32, I32]],
+        ['fdRead', 'fd_read', [I32, I32, I32, I32]],
+        ['fdClose', 'fd_close', [I32]],
+      ]) {
+        IMP[key] = imports.length;
+        imports.push({ mod: 'wasi_snapshot_preview1', name: nm, type: typeIndex(params, [I32]) });
+      }
+    }
+    this.imp = IMP;
     const helperNames = ['alloc', 'write', 'fail', 'chk', 'mul', 'concat', 'itoa', 'streq', 'strlen', 'enter', 'leave'];
     this.h = Object.fromEntries(helperNames.map((n, i) => [n, imports.length + i]));
     const userBase = imports.length + helperNames.length;
@@ -175,7 +191,11 @@ class Compiler {
     // 利用者の関数を先に作る（文字の定数を集めて、ヒープの始まりを決めるため）
     const userFns = p.fns.map((f) => this.fn(f));
     const helpers = this.helpers(IMP, G);
-    const start = { type: typeIndex([], []), locals: [], body: [...op.call(this.fnIndex.get('main')), ...op.end] };
+    // 始めに、フォルダ（fd 3）が渡されているかを確かめる。無ければインタプリタと同じく R509
+    const grant = folder
+      ? [...op.i32(3), ...op.i32(SCRATCH), ...op.call(IMP.prestat), ...op.if(EMPTY), ...this.failAt('R509', `main asks for a Folder ('${folder.name}') but none was granted`, folder.pos), ...op.end]
+      : [];
+    const start = { type: typeIndex([], []), locals: [], body: [...grant, ...op.call(this.fnIndex.get('main')), ...op.end] };
 
     const funcs = [
       ...helpers.map((x) => ({ ...x, type: typeIndex(x.params, x.results) })),
@@ -348,7 +368,7 @@ class Compiler {
     const locals = [];
     const scope = new Map();
     for (const prm of f.params) {
-      if (prm.type.k === 'Console') continue; // 鍵は消す
+      if (CAPS.includes(prm.type.k)) continue; // 鍵は消す
       const t = valType(prm.type);
       if (t === undefined) throw new Unsupported(`parameters of type ${typeStr(fromAst(prm.type))}`, prm.pos);
       if (t === null) { scope.set(prm.name, { index: -1, type: null }); continue; }
@@ -512,7 +532,7 @@ class Compiler {
       const f = this.program.fns.find((x) => x.name === e.name);
       const out = [];
       for (const prm of f.params) {
-        if (prm.type.k === 'Console') continue;
+        if (CAPS.includes(prm.type.k)) continue;
         out.push(...A(prm.name));
       }
       return [...out, ...op.call(this.fnIndex.get(e.name))];
@@ -528,6 +548,16 @@ class Compiler {
       case 'str_len': return [...A('text'), ...op.call(this.h.strlen)];
       case 'trim': return [...A('text'), ...op.call(this.trimFn())];
       case 'parse_int': return [...A('text'), ...op.call(this.parseIntFn())];
+      case 'read_text': {
+        const r = ctx.local(I32);
+        return [
+          ...A('path'), ...op.call(this.readTextFn()), ...op.localTee(r), ...op.i32Eqz,
+          ...op.if(EMPTY), ...this.failAt('R507', 'the path is not inside the folder', e.pos), ...op.end,
+          ...op.localGet(r), ...op.i32(1), ...op.i32Eq,
+          ...op.if(EMPTY), ...this.failAt('R507', 'the path points outside the folder (through a link)', e.pos), ...op.end,
+          ...op.localGet(r),
+        ];
+      }
       default: {
         const v = arg('value').value;
         const s = this.showCode(v.ty, this.expr(v, scope, ctx), false, v.pos);
@@ -1254,6 +1284,135 @@ class Compiler {
       }
       default: throw new Unsupported(`the built-in function ${e.name}`, pos);
     }
+  }
+  // ---- ファイルを読む（Folder。WASI の fd 3 が、渡されたフォルダ） ----
+  // read_text の本体。返すのは Result[Str] の場所。ただし 0 は「パスがフォルダの中を指していない」、1 は「リンクで外を指す」（呼ぶ側が R507 で止める）
+  readTextFn() {
+    const utf8ok = this.utf8OkFn();
+    const slice = this.sliceFn();
+    const rt = { k: 'Data', name: 'Result', args: [{ k: 'Str' }] };
+    return this.gen('read_text', [I32], [I32], (local) => {
+      const [n, i, seg, b, e, fd, buf, cap, total, nr, tmp] = [local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32)];
+      const ctx = { local: () => tmp };
+      const byte = (at) => [...op.localGet(0), ...at, ...op.i32Add, ...op.i32Load8u(4)];
+      const err = (suffix) => [
+        ...this.mkData(rt, 'Err', [[...op.i32(this.str("'")), ...op.localGet(0), ...op.call(this.h.concat), ...op.i32(this.str(`' ${suffix}`)), ...op.call(this.h.concat)]], ctx, null),
+        ...op.return,
+      ];
+      const ret0 = [...op.i32(0), ...op.return];
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n),
+        // インタプリタと同じ確かめ：空・/ で始まる・C: で始まる・\ か \0 を含む・.. の段がある
+        ...op.localGet(n), ...op.i32Eqz, ...op.if(EMPTY), ...ret0, ...op.end,
+        ...byte(op.i32(0)), ...op.i32(47), ...op.i32Eq, ...op.if(EMPTY), ...ret0, ...op.end,
+        ...op.localGet(n), ...op.i32(2), ...op.i32GeU, ...op.if(EMPTY),
+        ...byte(op.i32(1)), ...op.i32(58), ...op.i32Eq, ...byte(op.i32(0)), ...op.i32(32), ...op.i32Or, ...op.i32(97), ...op.i32Sub, ...op.i32(26), ...op.i32LtU, ...op.i32And,
+        ...op.if(EMPTY), ...ret0, ...op.end, ...op.end,
+        ...op.i32(0), ...op.localSet(seg),
+        ...op.i32(0), ...op.localSet(i),
+        ...op.block(EMPTY), ...op.loop(EMPTY),
+        // i == n か、i の文字が / なら、段 [seg, i) を見る
+        ...op.localGet(i), ...op.localGet(n), ...op.i32Eq,
+        ...op.if(I32), ...op.i32(1), ...op.else,
+        ...byte(op.localGet(i)), ...op.localTee(b), ...op.i32(92), ...op.i32Eq, ...op.localGet(b), ...op.i32Eqz, ...op.i32Or, ...op.if(EMPTY), ...ret0, ...op.end,
+        ...op.localGet(b), ...op.i32(47), ...op.i32Eq,
+        ...op.end,
+        ...op.if(EMPTY),
+        ...op.localGet(i), ...op.localGet(seg), ...op.i32Sub, ...op.i32(2), ...op.i32Eq,
+        ...op.if(EMPTY),
+        ...byte(op.localGet(seg)), ...op.i32(46), ...op.i32Eq, ...byte([...op.localGet(seg), ...op.i32(1), ...op.i32Add]), ...op.i32(46), ...op.i32Eq, ...op.i32And,
+        ...op.if(EMPTY), ...ret0, ...op.end,
+        ...op.end,
+        ...op.localGet(i), ...op.i32(1), ...op.i32Add, ...op.localSet(seg),
+        ...op.end,
+        ...op.localGet(i), ...op.localGet(n), ...op.i32GeU, ...op.brIf(1),
+        ...op.localGet(i), ...op.i32(1), ...op.i32Add, ...op.localSet(i), ...op.br(0),
+        ...op.end, ...op.end,
+        // 開ける：読む権利（fd_read と fd_filestat_get）だけを頼む（書く・作る権利は頼まない）。リンクはたどり、外を指していれば受け皿が断る
+        ...op.i32(3), ...op.i32(1), ...op.localGet(0), ...op.i32(4), ...op.i32Add, ...op.localGet(n), ...op.i32(0), ...op.i64(2 + 2097152), ...op.i64(0), ...op.i32(0), ...op.i32(SCRATCH),
+        ...op.call(this.imp.pathOpen), ...op.localTee(e),
+        ...op.if(EMPTY),
+        ...op.localGet(e), ...op.i32(76), ...op.i32Eq, ...op.localGet(e), ...op.i32(63), ...op.i32Eq, ...op.i32Or, ...op.if(EMPTY), ...op.i32(1), ...op.return, ...op.end,
+        ...op.localGet(e), ...op.i32(44), ...op.i32Eq, ...op.if(EMPTY), ...err('does not exist'), ...op.end,
+        ...op.localGet(e), ...op.i32(31), ...op.i32Eq, ...op.localGet(e), ...op.i32(54), ...op.i32Eq, ...op.i32Or, ...op.if(EMPTY), ...err('is not a file'), ...op.end,
+        ...err('could not be read as UTF-8 text'),
+        ...op.end,
+        ...op.i32(SCRATCH), ...op.i32Load(0), ...op.localSet(fd),
+        // ふつうのファイル（filetype 4）でなければ「ファイルでない」（フォルダを開けても、読む前に止める）
+        ...op.i32(64), ...op.call(this.h.alloc), ...op.localSet(nr),
+        ...op.localGet(fd), ...op.localGet(nr), ...op.call(this.imp.fdFilestat), ...op.localGet(nr), ...op.i32Load8u(16), ...op.i32(4), ...op.i32Ne, ...op.i32Or,
+        ...op.if(EMPTY), ...op.localGet(fd), ...op.call(this.imp.fdClose), ...op.drop, ...err('is not a file'), ...op.end,
+        // 読む：64KiB ずつ。alloc は続けて呼ぶと続きの場所を返すので、1つの文字としてつながる
+        ...op.i32(4 + 65536), ...op.call(this.h.alloc), ...op.localSet(buf), ...op.i32(65536), ...op.localSet(cap),
+        ...op.block(EMPTY), ...op.loop(EMPTY),
+        ...op.localGet(total), ...op.localGet(cap), ...op.i32Eq, ...op.if(EMPTY), ...op.i32(65536), ...op.call(this.h.alloc), ...op.drop, ...op.localGet(cap), ...op.i32(65536), ...op.i32Add, ...op.localSet(cap), ...op.end,
+        ...op.i32(IOV), ...op.localGet(buf), ...op.i32(4), ...op.i32Add, ...op.localGet(total), ...op.i32Add, ...op.i32Store(0),
+        ...op.i32(IOV), ...op.localGet(cap), ...op.localGet(total), ...op.i32Sub, ...op.i32Store(4),
+        ...op.localGet(fd), ...op.i32(IOV), ...op.i32(1), ...op.i32(SCRATCH + 8), ...op.call(this.imp.fdRead), ...op.localTee(e),
+        ...op.if(EMPTY),
+        ...op.localGet(fd), ...op.call(this.imp.fdClose), ...op.drop,
+        ...op.localGet(e), ...op.i32(31), ...op.i32Eq, ...op.if(EMPTY), ...err('is not a file'), ...op.end,
+        ...err('could not be read as UTF-8 text'),
+        ...op.end,
+        ...op.i32(SCRATCH + 8), ...op.i32Load(0), ...op.localTee(nr), ...op.i32Eqz, ...op.brIf(1),
+        ...op.localGet(total), ...op.localGet(nr), ...op.i32Add, ...op.localSet(total), ...op.br(0),
+        ...op.end, ...op.end,
+        ...op.localGet(fd), ...op.call(this.imp.fdClose), ...op.drop,
+        ...op.localGet(buf), ...op.localGet(total), ...op.i32Store(0),
+        ...op.localGet(buf), ...op.call(utf8ok), ...op.i32Eqz, ...op.if(EMPTY), ...err('could not be read as UTF-8 text'), ...op.end,
+        // 先頭の BOM（EF BB BF）は落とす（インタプリタの TextDecoder と同じ）
+        ...op.localGet(total), ...op.i32(3), ...op.i32GeU, ...op.if(EMPTY),
+        ...op.localGet(buf), ...op.i32Load8u(4), ...op.i32(0xef), ...op.i32Eq,
+        ...op.localGet(buf), ...op.i32Load8u(5), ...op.i32(0xbb), ...op.i32Eq, ...op.i32And,
+        ...op.localGet(buf), ...op.i32Load8u(6), ...op.i32(0xbf), ...op.i32Eq, ...op.i32And,
+        ...op.if(EMPTY), ...op.localGet(buf), ...op.i32(3), ...op.localGet(total), ...op.call(slice), ...op.localSet(buf), ...op.end,
+        ...op.end,
+        ...this.mkData(rt, 'Ok', [op.localGet(buf)], ctx, null),
+      ];
+    });
+  }
+
+  // 正しい UTF-8 なら 1（長すぎる形・サロゲート・U+10FFFF を超えるものは 0。WHATWG の UTF-8 の読み方と同じ）
+  utf8OkFn() {
+    return this.gen('utf8 ok', [I32], [I32], (local) => {
+      const [n, i, b, need, lo, hi, k] = [local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32)];
+      const byte = (at) => [...op.localGet(0), ...at, ...op.i32Add, ...op.i32Load8u(4)];
+      const set = (nd, l, h) => [...op.i32(nd), ...op.localSet(need), ...op.i32(l), ...op.localSet(lo), ...op.i32(h), ...op.localSet(hi)];
+      const inRange = (a, z) => [...op.localGet(b), ...op.i32(a), ...op.i32Sub, ...op.i32(z - a + 1), ...op.i32LtU];
+      const rules = [
+        [inRange(0xc2, 0xdf), set(1, 0x80, 0xbf)],
+        [inRange(0xe0, 0xe0), set(2, 0xa0, 0xbf)],
+        [inRange(0xe1, 0xec), set(2, 0x80, 0xbf)],
+        [inRange(0xed, 0xed), set(2, 0x80, 0x9f)],
+        [inRange(0xee, 0xef), set(2, 0x80, 0xbf)],
+        [inRange(0xf0, 0xf0), set(3, 0x90, 0xbf)],
+        [inRange(0xf1, 0xf3), set(3, 0x80, 0xbf)],
+        [inRange(0xf4, 0xf4), set(3, 0x80, 0x8f)],
+      ];
+      const chain = (j) => (j === rules.length
+        ? [...op.i32(0), ...op.return]
+        : [...rules[j][0], ...op.if(EMPTY), ...rules[j][1], ...op.else, ...chain(j + 1), ...op.end]);
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n),
+        ...op.block(EMPTY), ...op.loop(EMPTY),
+        ...op.localGet(i), ...op.localGet(n), ...op.i32GeU, ...op.brIf(1),
+        ...byte(op.localGet(i)), ...op.localTee(b), ...op.i32(0x80), ...op.i32LtU,
+        ...op.if(EMPTY), ...op.localGet(i), ...op.i32(1), ...op.i32Add, ...op.localSet(i), ...op.br(1), ...op.end,
+        ...chain(0),
+        ...op.localGet(i), ...op.localGet(need), ...op.i32Add, ...op.localGet(n), ...op.i32GeU, ...op.if(EMPTY), ...op.i32(0), ...op.return, ...op.end,
+        ...byte([...op.localGet(i), ...op.i32(1), ...op.i32Add]), ...op.localTee(b), ...op.localGet(lo), ...op.i32LtU,
+        ...op.localGet(b), ...op.localGet(hi), ...op.i32GtU, ...op.i32Or, ...op.if(EMPTY), ...op.i32(0), ...op.return, ...op.end,
+        ...op.i32(2), ...op.localSet(k),
+        ...op.block(EMPTY), ...op.loop(EMPTY),
+        ...op.localGet(k), ...op.localGet(need), ...op.i32GtU, ...op.brIf(1),
+        ...byte([...op.localGet(i), ...op.localGet(k), ...op.i32Add]), ...op.i32(0xc0), ...op.i32And, ...op.i32(0x80), ...op.i32Ne, ...op.if(EMPTY), ...op.i32(0), ...op.return, ...op.end,
+        ...op.localGet(k), ...op.i32(1), ...op.i32Add, ...op.localSet(k), ...op.br(0),
+        ...op.end, ...op.end,
+        ...op.localGet(i), ...op.localGet(need), ...op.i32Add, ...op.i32(1), ...op.i32Add, ...op.localSet(i), ...op.br(0),
+        ...op.end, ...op.end,
+        ...op.i32(1),
+      ];
+    });
   }
 }
 
