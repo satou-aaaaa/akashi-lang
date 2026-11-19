@@ -1,4 +1,4 @@
-# Akashi language spec (v0.5)
+# Akashi language spec (v0.7)
 
 Paste this whole file into an LLM prompt to teach it Akashi. It is short on purpose.
 
@@ -160,6 +160,17 @@ end
 | `get(list: xs, index: i)` | T; out of range is an error, so only use it after checking `i < len(list: xs)` |
 | `find(list: xs, func: f)` | Option[T], the first item where f gives true |
 | `append(list: xs, item: x)` | List[T] |
+| `reverse(list: xs)` | List[T] |
+| `take(list: xs, count: n)` / `drop(list: xs, count: n)` | List[T]; first n items / all but the first n (n < 0 is an error) |
+| `sort(list: xs)` | List[Int], ascending |
+| `sum(list: xs)` | Int |
+| `max(list: xs)` / `min(list: xs)` | Option[Int]; None for [] |
+| `any(list: xs, func: f)` / `all(list: xs, func: f)` | Bool |
+| `chars(text: s)` | List[Str], one per character |
+| `split(text: s, by: sep)` | List[Str] (sep must not be "") |
+| `join(parts: xs, by: sep)` | Str |
+| `contains(text: s, part: p)` / `starts_with(text: s, prefix: p)` / `ends_with(text: s, suffix: p)` | Bool |
+| `trim(text: s)` | Str without spaces and line ends around it |
 | `map(list: xs, func: f)` | f: fn(T) -> U, gives List[U] |
 | `filter(list: xs, func: f)` | f: fn(T) -> Bool |
 | `fold(list: xs, init: z, func: f)` | f: fn(acc, item) -> acc |
@@ -177,17 +188,17 @@ do
   acc + x
 end
 
-fn sum(xs: List[Int]) -> Int
+fn add_all(xs: List[Int]) -> Int
   ensures len(list: xs) > 0 or result == 0
-  example sum(xs: [1, 2, 3]) == 6
-  example sum(xs: []) == 0
+  example add_all(xs: [1, 2, 3]) == 6
+  example add_all(xs: []) == 0
 do
   fold(list: xs, init: 0, func: add)
 end
 
 fn main(console: Console) -> Unit
 do
-  let total: Int = sum(xs: [3, 8, 1])
+  let total: Int = add_all(xs: [3, 8, 1])
   print(to: console, value: "total = " ++ to_str(value: total))
 end
 ```

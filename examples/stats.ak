@@ -6,10 +6,10 @@ do
   acc + x
 end
 
-fn sum(xs: List[Int]) -> Int
+fn add_all(xs: List[Int]) -> Int
   ensures len(list: xs) > 0 or result == 0
-  example sum(xs: [1, 2, 3]) == 6
-  example sum(xs: []) == 0
+  example add_all(xs: [1, 2, 3]) == 6
+  example add_all(xs: []) == 0
 do
   fold(list: xs, init: 0, func: add)
 end
@@ -19,7 +19,7 @@ fn mean(xs: List[Int]) -> Int
   ensures true
   example mean(xs: [2, 4, 9]) == 5
 do
-  sum(xs: xs) / len(list: xs)
+  add_all(xs: xs) / len(list: xs)
 end
 
 fn is_even(x: Int) -> Bool
@@ -34,7 +34,7 @@ fn main(console: Console) -> Unit
 do
   let data: List[Int] = [3, 8, 1, 6, 10]
   let evens: List[Int] = filter(list: data, func: is_even)
-  print(to: console, value: "sum = " ++ to_str(value: sum(xs: data)))
+  print(to: console, value: "sum = " ++ to_str(value: add_all(xs: data)))
   print(to: console, value: "mean = " ++ to_str(value: mean(xs: data)))
   print(to: console, value: evens)
 end

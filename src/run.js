@@ -105,6 +105,24 @@ export class Machine {
         for (const x of a.list) if (this.apply(a.func, [x], pos) === true) return some(x);
         return NONE;
       }
+      case 'any': return a.list.some((x) => this.apply(a.func, [x], pos) === true);
+      case 'all': return a.list.every((x) => this.apply(a.func, [x], pos) === true);
+      case 'reverse': return [...a.list].reverse();
+      case 'take': return a.list.slice(0, this.count(a.count, pos));
+      case 'drop': return a.list.slice(this.count(a.count, pos));
+      case 'sort': return [...a.list].sort((x, y) => x - y);
+      case 'sum': return a.list.reduce((s, x) => this.int(s + x, pos), 0);
+      case 'max': return a.list.length ? some(Math.max(...a.list)) : NONE;
+      case 'min': return a.list.length ? some(Math.min(...a.list)) : NONE;
+      case 'chars': return [...a.text];
+      case 'split':
+        if (a.by === '') this.fail('R506', 'split needs a non-empty separator', pos, 'to split into characters use chars(text: ...)');
+        return a.text.split(a.by);
+      case 'join': return a.parts.join(a.by);
+      case 'contains': return a.text.includes(a.part);
+      case 'starts_with': return a.text.startsWith(a.prefix);
+      case 'ends_with': return a.text.endsWith(a.suffix);
+      case 'trim': return a.text.trim();
       case 'lines': return a.text === '' ? [] : a.text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');
       case 'len': return a.list.length;
       case 'str_len': return [...a.text].length;
@@ -124,6 +142,12 @@ export class Machine {
       case 'fold': return a.list.reduce((acc, x) => this.apply(a.func, [acc, x], pos), a.init);
       default: throw new Error(`internal: unknown function ${name}`);
     }
+  }
+
+  // take・drop の数。負の数は書き方の誤りとして止める（黙って 0 にしない）
+  count(n, pos) {
+    if (n < 0) this.fail('R506', `count ${n} is negative`, pos, 'give a count of 0 or more');
+    return n;
   }
 
   holes(holes, values, pos, mark) {

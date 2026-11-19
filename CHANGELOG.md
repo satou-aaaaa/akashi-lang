@@ -3,6 +3,17 @@
 版の決め方：試作のあいだは 0.x。言語の決まりが変わる（前に通ったプログラムが通らなくなる）ときは、2つめの数を上げる。
 形は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) にならう。
 
+## 0.7.0 — 2026-11-19
+
+### 足した
+- 標準の関数（リスト）：`any`・`all`・`reverse`・`take`・`drop`・`sort`（List[Int]）・`sum`・`max`・`min`（空なら None）。
+- 標準の関数（文字）：`chars`・`split`・`join`・`contains`・`starts_with`・`ends_with`・`trim`。
+- 見本 `examples/words.ak`。
+
+### 変えた（前のプログラムが通らないことがある）
+- 上の名前は標準の関数になったので、同じ名前の関数は作れない（名前の使い回し無し）。見本の `sum` は `add_all` にした。
+- `take`・`drop` に負の数、`split` に空の区切りを渡すと R506 で止まる。
+
 ## 0.6.0 — 2026-11-19
 
 ### 足した
