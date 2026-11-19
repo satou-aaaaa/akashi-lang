@@ -2,15 +2,24 @@
 import { realpathSync, readFileSync, statSync } from 'node:fs';
 import { resolve, sep, isAbsolute } from 'node:path';
 import { AkashiError, diag } from './errors.js';
+import { BUILTIN_TYPES } from './check.js';
 
 const MAX_DEPTH = 500; // JS の呼び出しの深さに収まる数（約800で JS が先にあふれる）。長いくり返しは range と fold で書く
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const escapeHtml = (x) => x.replace(/[&<>"']/g, (c) => ESC[c]);
 
+const NONE = { tag: 'None', fields: {} };
+const some = (value) => ({ tag: 'Some', fields: { value } });
+const err = (message) => ({ tag: 'Err', fields: { message } });
+
 export function show(v, nested = false) {
   if (v === null) return '()';
   if (v && v.cap) return `<${v.cap}>`;
+  if (v && v.tag !== undefined) {
+    const fs = Object.entries(v.fields);
+    return fs.length ? `${v.tag}(${fs.map(([k, x]) => `${k}: ${show(x, true)}`).join(', ')})` : v.tag;
+  }
   if (v && v.html !== undefined) return v.html;
   if (v && v.sql !== undefined) return `${v.sql} -- params: ${JSON.stringify(v.params)}`;
   if (Array.isArray(v)) return `[${v.map((x) => show(x, true)).join(', ')}]`;
@@ -21,6 +30,7 @@ export function show(v, nested = false) {
 
 function equal(a, b) {
   if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => equal(x, b[i]));
+  if (a && b && a.tag !== undefined && b.tag !== undefined) return a.tag === b.tag && Object.keys(a.fields).every((k) => equal(a.fields[k], b.fields[k]));
   return a === b;
 }
 
@@ -30,6 +40,7 @@ export class OutOfBudget extends Error {}
 export class Machine {
   constructor(program, out = (s) => process.stdout.write(s)) {
     this.fns = new Map(program.fns.map((f) => [f.name, f]));
+    this.variants = new Map([...BUILTIN_TYPES, ...(program.types ?? [])].flatMap((t) => t.variants.map((v) => [v.name, v])));
     this.out = out;
     this.depth = 0;
   }
@@ -42,6 +53,8 @@ export class Machine {
   }
 
   callFn(name, args, pos) {
+    const v = this.variants.get(name);
+    if (v) return { tag: name, fields: Object.fromEntries(v.fields.map((x) => [x.name, args[x.name]])) };
     const f = this.fns.get(name);
     if (!f) return this.builtin(name, args, pos);
     if (++this.depth > MAX_DEPTH) this.fail('R505', `recursion deeper than ${MAX_DEPTH} calls in '${name}'`, pos, 'check that the recursion reaches its base case; use fold or range for long loops');
@@ -83,6 +96,16 @@ export class Machine {
         return { sql: a.template, params: [...a.values] };
       }
       case 'read_text': return this.readText(a.from, a.path, pos);
+      case 'parse_int': {
+        const t = a.text.trim();
+        if (!/^-?[0-9]+$/.test(t) || !Number.isSafeInteger(Number(t))) return NONE;
+        return some(Number(t) === 0 ? 0 : Number(t));
+      }
+      case 'at': return a.index >= 0 && a.index < a.list.length ? some(a.list[a.index]) : NONE;
+      case 'find': {
+        for (const x of a.list) if (this.apply(a.func, [x], pos) === true) return some(x);
+        return NONE;
+      }
       case 'lines': return a.text === '' ? [] : a.text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');
       case 'len': return a.list.length;
       case 'str_len': return [...a.text].length;
@@ -108,6 +131,7 @@ export class Machine {
     if (holes !== values) this.fail('R510', `the template has ${holes} hole(s) '${mark}' but ${values} value(s) were given`, pos, `give exactly one value per '${mark}'`);
   }
 
+  // 読めないとき（無い・フォルダ・文字が読めない）は Err を返す。フォルダの外を指すのは書き方の誤りなので止める（R507）
   // Folder の権利で読めるのは、渡されたフォルダの中だけ（.. や絶対パス、外を指すリンクは止める）
   readText(folder, path, pos) {
     const bad = path === '' || isAbsolute(path) || path.includes('\\') || path.includes('\0') || path.split('/').some((x) => x === '..');
@@ -116,13 +140,17 @@ export class Machine {
     try {
       real = realpathSync(resolve(folder.root, path));
     } catch {
-      this.fail('R508', `cannot read '${path}' (it does not exist)`, pos, 'check the file name; paths are relative to the folder given with --allow-read');
+      return err(`'${path}' does not exist`);
     }
     if (real !== folder.root && !real.startsWith(folder.root + sep)) {
       this.fail('R507', `path '${path}' points outside the folder (through a link)`, pos, 'read only files that are really inside the folder');
     }
-    if (!statSync(real).isFile()) this.fail('R508', `'${path}' is not a file`, pos, 'give the path of a file, not a folder');
-    return readFileSync(real, 'utf8');
+    if (!statSync(real).isFile()) return err(`'${path}' is not a file`);
+    try {
+      return { tag: 'Ok', fields: { value: new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(real)) } };
+    } catch {
+      return err(`'${path}' could not be read as UTF-8 text`);
+    }
   }
 
   apply(ref, values, pos) {
@@ -146,7 +174,17 @@ export class Machine {
       case 'int': return this.int(e.v, e.pos);
       case 'str': case 'bool': return e.v;
       case 'unit': return null;
-      case 'var': return env.has(e.name) ? env.get(e.name) : { fnref: e.name };
+      case 'var':
+        if (env.has(e.name)) return env.get(e.name);
+        if (this.variants.has(e.name)) return { tag: e.name, fields: {} };
+        return { fnref: e.name };
+      case 'match': {
+        const v = this.eval(e.subject, env);
+        const arm = e.arms.find((x) => x.variant === v.tag);
+        const scope = new Map(env);
+        for (const b of arm.binds) if (b.name !== '_') scope.set(b.name, v.fields[b.field]);
+        return this.eval(arm.value, scope);
+      }
       case 'list': return e.items.map((x) => this.eval(x, env));
       case 'un': {
         const v = this.eval(e.arg, env);

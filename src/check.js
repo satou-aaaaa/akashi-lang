@@ -16,8 +16,17 @@ export const countHoles = (template, hole) => template.split(hole).length - 1;
 // 権利（ケーパビリティ）の型。値を作る方法は無く、main が受け取って引数で渡すだけ
 const CAPS = ['Console', 'Folder'];
 const isCap = (t) => CAPS.includes(prune(t).k);
-const hasCap = (t) => { t = prune(t); return isCap(t) || (t.k === 'List' && hasCap(t.of)); }; // 先のエラーの続きで出る2つめのエラーを止める
+const hasCap = (t) => { t = prune(t); return isCap(t) || (t.k === 'List' && hasCap(t.of)) || (t.k === 'Data' && t.args.some(hasCap)); };
 const List = (of) => ({ k: 'List', of });
+const Data = (name, args = []) => ({ k: 'Data', name, args });
+const Option = (of) => Data('Option', [of]);
+const Result = (of) => Data('Result', [of]);
+// 組み込みの型。T は使うときの型に置きかわる
+const T = { k: 'Param', name: 'T' };
+export const BUILTIN_TYPES = [
+  { name: 'Option', params: ['T'], variants: [{ name: 'Some', fields: [{ name: 'value', type: T }] }, { name: 'None', fields: [] }] },
+  { name: 'Result', params: ['T'], variants: [{ name: 'Ok', fields: [{ name: 'value', type: T }] }, { name: 'Err', fields: [{ name: 'message', type: { k: 'Str' } }] }] },
+];
 const Fn = (params, ret) => ({ k: 'Fn', params, ret });
 let varId = 0;
 const fresh = () => ({ k: 'Var', id: ++varId, ref: null });
@@ -32,6 +41,7 @@ function occurs(v, t) {
   if (t === v) return true;
   if (t.k === 'List') return occurs(v, t.of);
   if (t.k === 'Fn') return t.params.some((p) => occurs(v, p)) || occurs(v, t.ret);
+  if (t.k === 'Data') return t.args.some((x) => occurs(v, x));
   return false;
 }
 
@@ -43,6 +53,7 @@ function unify(a, b) {
   if (b.k === 'Var') return unify(b, a);
   if (a.k !== b.k) return false;
   if (a.k === 'List') return unify(a.of, b.of);
+  if (a.k === 'Data') return a.name === b.name && a.args.every((x, i) => unify(x, b.args[i]));
   if (a.k === 'Fn') {
     if (a.params.length !== b.params.length) return false;
     return a.params.every((p, i) => unify(p, b.params[i])) && unify(a.ret, b.ret);
@@ -54,6 +65,7 @@ export function typeStr(t) {
   t = prune(t);
   if (t.k === 'List') return `List[${typeStr(t.of)}]`;
   if (t.k === 'Fn') return `fn(${t.params.map(typeStr).join(', ')}) -> ${typeStr(t.ret)}`;
+  if (t.k === 'Data') return t.args.length ? `${t.name}[${t.args.map(typeStr).join(', ')}]` : t.name;
   if (t.k === 'Var') return 'T';
   if (t.k === 'Err') return '?';
   return t.k;
@@ -62,7 +74,9 @@ export function typeStr(t) {
 // 組み込み関数。呼ぶたびに型変数を新しくする。引数はすべて名前つき。
 export const BUILTINS = {
   print: () => ({ params: [['to', CONSOLE], ['value', fresh()]], ret: UNIT }),
-  read_text: () => ({ params: [['from', FOLDER], ['path', STR]], ret: STR }),
+  // 失敗しうる操作は Result を返す。match で Err も書かないと通らない（例外の見落としを無くす）
+  read_text: () => ({ params: [['from', FOLDER], ['path', STR]], ret: Result(STR) }),
+  parse_int: () => ({ params: [['text', STR]], ret: Option(INT) }),
   lines: () => ({ params: [['text', STR]], ret: List(STR) }),
   html: () => ({ params: [['template', STR], ['values', List(HTML)]], ret: HTML }),
   html_text: () => ({ params: [['value', STR]], ret: HTML }),
@@ -73,14 +87,19 @@ export const BUILTINS = {
   to_str: () => ({ params: [['value', fresh()]], ret: STR }),
   range: () => ({ params: [['from', INT], ['to', INT]], ret: List(INT) }),
   get: () => { const a = fresh(); return { params: [['list', List(a)], ['index', INT]], ret: a }; },
+  at: () => { const a = fresh(); return { params: [['list', List(a)], ['index', INT]], ret: Option(a) }; },
+  find: () => { const a = fresh(); return { params: [['list', List(a)], ['func', Fn([a], BOOL)]], ret: Option(a) }; },
   append: () => { const a = fresh(); return { params: [['list', List(a)], ['item', a]], ret: List(a) }; },
   map: () => { const a = fresh(); const b = fresh(); return { params: [['list', List(a)], ['func', Fn([a], b)]], ret: List(b) }; },
   filter: () => { const a = fresh(); return { params: [['list', List(a)], ['func', Fn([a], BOOL)]], ret: List(a) }; },
   fold: () => { const a = fresh(); const b = fresh(); return { params: [['list', List(a)], ['init', b], ['func', Fn([b, a], b)]], ret: b }; },
 };
 
-function fromAst(t) {
-  return t.k === 'List' ? List(fromAst(t.of)) : { k: t.k };
+function fromAst(t, subst = {}) {
+  if (t.k === 'List') return List(fromAst(t.of, subst));
+  if (t.k === 'Data') return Data(t.name, t.args.map((x) => fromAst(x, subst)));
+  if (t.k === 'Param') return subst[t.name];
+  return { k: t.k };
 }
 
 function callTemplate(name, params) {
@@ -91,10 +110,39 @@ export function check(program) {
   const diags = [];
   const err = (code, msg, pos, fix) => diags.push(diag(code, msg, pos, fix));
   const fns = new Map();
+  // 型と case の表。variants: case の名前 → { type, variant }
+  const types = new Map();
+  const variants = new Map();
+  for (const ty of [...BUILTIN_TYPES, ...(program.types ?? []).map((x) => ({ ...x, params: [], user: true }))]) {
+    if (types.has(ty.name) || (ty.user && ['Int', 'Bool', 'Str', 'Unit', 'List', 'Html', 'Sql', 'Console', 'Folder'].includes(ty.name))) {
+      err('E203', `type '${ty.name}' is already defined`, ty.pos, 'give the type a different name');
+      continue;
+    }
+    types.set(ty.name, ty);
+    for (const v of ty.variants) {
+      if (variants.has(v.name)) {
+        err('E203', `case '${v.name}' is already used${variants.get(v.name).type.user ? '' : ' (built-in)'}`, v.pos, `case names are unique across all types; rename it, e.g. ${ty.name}${v.name}`);
+        continue;
+      }
+      variants.set(v.name, { type: ty, variant: v });
+      const seen = new Set();
+      for (const f of v.fields) {
+        if (seen.has(f.name)) err('E203', `field '${f.name}' appears twice in case ${v.name}`, f.pos, 'give each field its own name');
+        seen.add(f.name);
+        if (ty.user && hasCap(fromAst(f.type))) err('E309', `field '${f.name}' of ${v.name} holds a capability`, f.pos, 'capabilities cannot be stored in data; pass them as parameters');
+      }
+    }
+  }
+  // case を使うときの型：型の T を新しい型変数にして、その型と各欄の型を返す
+  const instantiate = (ty) => {
+    const subst = Object.fromEntries(ty.params.map((p) => [p, fresh()]));
+    return { self: Data(ty.name, ty.params.map((p) => subst[p])), subst };
+  };
+  const caseTemplate = (v) => (v.fields.length ? `${v.name}(${v.fields.map((f) => `${f.name}: _`).join(', ')})` : v.name);
 
   for (const f of program.fns) {
-    if (fns.has(f.name) || f.name in BUILTINS) {
-      err('E203', `function '${f.name}' is already defined${f.name in BUILTINS ? ' (built-in)' : ''}`, f.pos, 'give the function a different name; names are never reused');
+    if (fns.has(f.name) || f.name in BUILTINS || variants.has(f.name)) {
+      err('E203', `function '${f.name}' is already defined${f.name in BUILTINS ? ' (built-in)' : variants.has(f.name) ? ' (as a case of a type)' : ''}`, f.pos, 'give the function a different name; names are never reused');
       continue;
     }
     fns.set(f.name, f);
@@ -105,7 +153,8 @@ export function check(program) {
     ret: fromAst(f.ret),
   });
 
-  const allNames = (env) => [...env.keys(), ...fns.keys(), ...Object.keys(BUILTINS)];
+  const allNames = (env) => [...env.keys(), ...fns.keys(), ...Object.keys(BUILTINS), ...variants.keys()];
+  const taken = (scope, name) => scope.has(name) || fns.has(name) || name in BUILTINS || variants.has(name);
 
   function checkBlock(block, env, ctx) {
     const scope = new Map(env);
@@ -115,7 +164,7 @@ export function check(program) {
         if (!unify(UNIT, t)) err('E201', `this line gives ${typeStr(t)} but its value is thrown away`, l.pos, 'only Unit expressions (like print) can stand alone; keep the value with let name: Type = ..., or make it the last line');
         continue;
       }
-      if (scope.has(l.name) || fns.has(l.name) || l.name in BUILTINS) {
+      if (taken(scope, l.name)) {
         err('E203', `the name '${l.name}' is already used`, l.pos, `names cannot be reused or shadowed; pick a new name such as ${l.name}2 or a more specific one`);
       }
       const want = fromAst(l.type);
@@ -137,6 +186,18 @@ export function check(program) {
       case 'unit': return UNIT;
       case 'var': {
         if (env.has(e.name)) return env.get(e.name);
+        if (variants.has(e.name)) {
+          const { type, variant } = variants.get(e.name);
+          if (variant.fields.length) {
+            err('E202', `case '${e.name}' has fields and must be called with them`, e.pos, `write ${caseTemplate(variant).replace(/_/g, '...')}`);
+            return ERR;
+          }
+          return instantiate(type).self;
+        }
+        if (['null', 'nil', 'undefined', 'None_'].includes(e.name)) {
+          err('E200', `there is no '${e.name}'`, e.pos, 'a value that may be missing has type Option[T]: write None, and Some(value: x) when there is one');
+          return ERR;
+        }
         if (fns.has(e.name)) {
           const s = sigOf(fns.get(e.name));
           if (s.params.some(([, t]) => isCap(t))) {
@@ -181,8 +242,65 @@ export function check(program) {
         return a;
       }
       case 'call': return call(e, env, ctx);
+      case 'match': return matchExpr(e, env, ctx);
       default: throw new Error(`internal: unknown node ${e.k}`);
     }
+  }
+
+  // match：どの case も1回ずつ。欄は宣言の順に全部書く（使わない欄は _）
+  function matchExpr(e, env, ctx) {
+    const st = expr(e.subject, env, ctx);
+    let pt = prune(st);
+    if (pt.k === 'Var') {
+      const first = variants.get(e.arms[0].variant);
+      if (first) { unify(pt, instantiate(first.type).self); pt = prune(st); }
+    }
+    if (pt.k !== 'Data') {
+      if (pt.k !== 'Err') err('E201', `match needs a value of a declared type (or Option / Result) but got ${typeStr(st)}`, e.pos, 'to choose by a condition on Int, Str or Bool, use when ... then ... else ... end');
+      return ERR;
+    }
+    const ty = types.get(pt.name);
+    const subst = Object.fromEntries(ty.params.map((p, i) => [p, pt.args[i]]));
+    const seen = new Set();
+    let out = fresh();
+    let outOk = true;
+    for (const arm of e.arms) {
+      const found = variants.get(arm.variant);
+      const scope = new Map(env);
+      if (!found || found.type !== ty) {
+        const s = suggest(arm.variant, ty.variants.map((v) => v.name));
+        err('E211', found ? `case '${arm.variant}' belongs to ${found.type.name}, not ${ty.name}` : arm.variant === '_' ? "'_' cannot be a case: there is no catch-all" : `${ty.name} has no case '${arm.variant}'`, arm.vpos,
+          `the cases of ${ty.name} are ${ty.variants.map((v) => v.name).join(', ')}${s ? `; did you mean ${s}?` : ''}. Write one line for each`);
+      } else if (seen.has(arm.variant)) {
+        err('E211', `case '${arm.variant}' is written twice`, arm.vpos, 'keep one line per case');
+      } else {
+        seen.add(arm.variant);
+        const v = found.variant;
+        const want = v.fields.map((f) => f.name);
+        const got = arm.binds.map((b) => b.field);
+        if (want.join(',') !== got.join(',')) {
+          err('E212', `the pattern for ${v.name} must list its fields (${want.join(', ') || 'none'}) in order`, arm.vpos, `write case ${caseTemplate(v)} then <value>; put a new name instead of _ for each field you use`);
+        }
+        for (const b of arm.binds) {
+          const field = v.fields.find((x) => x.name === b.field);
+          if (b.name === '_') continue;
+          if (taken(scope, b.name)) err('E203', `the name '${b.name}' is already used`, b.pos, `names cannot be reused or shadowed; pick a new name such as ${b.name}2`);
+          scope.set(b.name, field ? fromAst(field.type, subst) : ERR); // 欄の名前が違っても、続きの E200 は出さない
+        }
+      }
+      const t = expr(arm.value, scope, ctx);
+      if (outOk && !unify(out, t)) {
+        err('E201', `case ${arm.variant} gives ${typeStr(t)} but earlier cases give ${typeStr(out)}`, arm.pos, 'every case of match must give the same type');
+        outOk = false;
+      }
+    }
+    const missing = ty.variants.filter((v) => !seen.has(v.name));
+    const unknownArm = e.arms.some((a) => variants.get(a.variant)?.type !== ty);
+    if (missing.length && !unknownArm) {
+      err('E210', `match on ${ty.name} misses ${missing.map((v) => v.name).join(', ')}`, e.pos,
+        `add ${missing.map((v) => `case ${caseTemplate(v)} then <value>`).join(' and ')}. Every case must be handled (there is no catch-all, so a new case later is never silently ignored)`);
+    }
+    return outOk ? out : ERR;
   }
 
   function binary(e, env, ctx) {
@@ -233,7 +351,15 @@ export function check(program) {
 
   function call(e, env, ctx) {
     let sig;
-    if (fns.has(e.name)) sig = sigOf(fns.get(e.name));
+    if (variants.has(e.name)) {
+      const { type, variant } = variants.get(e.name);
+      const { self, subst } = instantiate(type);
+      if (!variant.fields.length) {
+        err('E202', `case '${e.name}' has no fields`, e.pos, `write ${e.name} without ( )`);
+        return self;
+      }
+      sig = { params: variant.fields.map((f) => [f.name, fromAst(f.type, subst)]), ret: self, ctor: true };
+    } else if (fns.has(e.name)) sig = sigOf(fns.get(e.name));
     else if (e.name in BUILTINS) sig = BUILTINS[e.name]();
     else {
       const s = suggest(e.name, [...fns.keys(), ...Object.keys(BUILTINS)]);
@@ -291,6 +417,7 @@ export function check(program) {
         continue;
       }
       const t = expr(a.value, env, ctx);
+      if (sig.ctor && isCap(t)) { err('E309', `capabilities cannot be stored in ${e.name}`, a.pos, 'pass the capability itself as an argument instead'); continue; }
       if (!argsOk || a.name === null) continue;
       const want = p[1];
       if (!unify(want, t)) {
@@ -321,7 +448,7 @@ export function check(program) {
 
     const env = new Map();
     for (const p of f.params) {
-      if (env.has(p.name) || fns.has(p.name) || p.name in BUILTINS) {
+      if (taken(env, p.name)) {
         err('E203', `parameter name '${p.name}' is already used`, p.pos, 'give the parameter a different name');
       }
       env.set(p.name, fromAst(p.type));

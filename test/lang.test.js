@@ -66,7 +66,8 @@ test('capabilities cannot be returned, put in lists or compared', () => {
 test('a Folder can only read inside the granted folder', () => {
   const src = (path) => `fn main(console: Console, folder: Folder) -> Unit do print(to: console, value: read_text(from: folder, path: "${path}")) end`;
   const grants = { folder: 'examples/files' };
-  assert.equal(runSource(src('fruits.txt'), { grants }).output, 'apple\nbanana\ncherry\n\n');
+  assert.equal(runSource(src('fruits.txt'), { grants }).output, 'Ok(value: "apple\\nbanana\\ncherry\\n")\n');
+  assert.equal(runSource(src('nothing.txt'), { grants }).output, 'Err(message: "\'nothing.txt\' does not exist")\n');
   for (const bad of ['/etc/passwd', '../bad/r507-escape.ak', 'a/../../x', 'a\\\\b']) {
     assert.equal(runSource(src(bad), { grants }).diagnostics[0].code, 'R507', bad);
   }
@@ -166,4 +167,63 @@ test('generated inputs give the same result every time (fixed seed)', () => {
 test('long-running generated inputs are skipped, not reported', () => {
   const c = checkSource('fn spin(n: Int) -> Int requires n >= 0 ensures true example spin(n: 1) == 0 do if n == 0 then 0 else spin(n: n - 1) end end');
   assert.equal(c.ok, true, JSON.stringify(c.diagnostics));
+});
+
+// v0.5：自分で作る型・漏れの無い match・Option・Result
+const SHAPE = 'type Shape\n  case Circle(radius: Int)\n  case Rect(width: Int, height: Int)\nend\n';
+
+test('a declared type is built with named fields and printed back the same way', () => {
+  const src = `${SHAPE}fn main(console: Console) -> Unit do print(to: console, value: [Circle(radius: 1), Rect(width: 2, height: 3)]) end`;
+  assert.equal(runSource(src).output, '[Circle(radius: 1), Rect(width: 2, height: 3)]\n');
+});
+
+test('match must handle every case; a later new case is reported where it is missed', () => {
+  const area = 'fn area(s: Shape) -> Int\n  ensures true\n  example area(s: Circle(radius: 1)) == 3\ndo\n  match s\n    case Circle(radius: r) then 3 * r * r\n    case Rect(width: w, height: h) then w * h\n  end\nend\n';
+  assert.deepEqual(codes(SHAPE + area), []);
+  const grown = SHAPE.replace('end\n', '  case Dot\nend\n');
+  assert.deepEqual(codes(grown + area), ['E210']);
+});
+
+test('match has no catch-all: else and _ are refused', () => {
+  assert.deepEqual(codes('fn f(x: Option[Int]) -> Int\n  ensures true\n  example f(x: None) == 0\ndo match x case None then 0 else 1 end end'), ['E211']);
+  assert.ok(codes('fn f(x: Option[Int]) -> Int\n  ensures true\n  example f(x: None) == 0\ndo match x case None then 0 case _ then 1 end end').includes('E211'));
+});
+
+test('a case from another type, a repeated case and wrong fields are reported', () => {
+  assert.ok(codes(`${SHAPE}fn f(x: Option[Int]) -> Int\n  ensures true\n  example f(x: None) == 0\ndo match x case None then 0 case Circle(radius: r) then r end end`).includes('E211'));
+  assert.ok(codes('fn f(x: Option[Int]) -> Int\n  ensures true\n  example f(x: None) == 0\ndo match x case None then 0 case None then 1 case Some(value: v) then v end end').includes('E211'));
+  assert.deepEqual(codes(`${SHAPE}fn f(s: Shape) -> Int\n  ensures true\n  example f(s: Circle(radius: 1)) == 1\ndo match s case Circle(radius: r) then r case Rect(height: h, width: w) then w end end`), ['E212']);
+});
+
+test('there is no null: missing values are Option, and the fix says so', () => {
+  assert.deepEqual(codes('fn main(console: Console) -> Unit do print(to: console, value: null) end'), ['E200']);
+  assert.equal(out('print(to: console, value: [parse_int(text: "12"), parse_int(text: "1.5"), parse_int(text: "")])'), '[Some(value: 12), None, None]\n');
+  assert.equal(out('print(to: console, value: [at(list: [5], index: 0), at(list: [5], index: 1)])'), '[Some(value: 5), None]\n');
+});
+
+test('an Option or Result cannot be used as its value without match', () => {
+  assert.deepEqual(codes('fn main(console: Console) -> Unit do print(to: console, value: parse_int(text: "1") + 1) end'), ['E201']);
+});
+
+test('pattern names follow the no-shadowing rule', () => {
+  assert.ok(codes('fn f(n: Int, x: Option[Int]) -> Int\n  ensures true\n  example f(n: 1, x: None) == 1\ndo match x case Some(value: n) then n case None then n end end').includes('E203'));
+});
+
+test('capabilities cannot be stored in data', () => {
+  assert.ok(codes('fn main(console: Console) -> Unit do print(to: console, value: Some(value: console)) end').includes('E309'));
+  assert.ok(codes('type Box case Box(c: Console) end\nfn main(console: Console) -> Unit do print(to: console, value: 1) end').includes('E309'));
+});
+
+test('generated inputs reach declared types and are shrunk', () => {
+  const src = `${SHAPE}fn area(s: Shape) -> Int\n  ensures result >= 0\n  example area(s: Rect(width: 2, height: 3)) == 6\ndo\n  match s\n    case Circle(radius: r) then 3 * r\n    case Rect(width: w, height: h) then w * h\n  end\nend\n`;
+  const c = checkSource(src);
+  assert.equal(c.diagnostics[0].code, 'R511');
+  assert.match(c.diagnostics[0].input, /^area\(s: (Circle\(radius: -1\)|Rect\(width: -?1, height: -?1\))\)$/);
+});
+
+test('recursive types work and generation stops at a safe depth', () => {
+  const src = 'type Tree\n  case Leaf\n  case Node(left: Tree, value: Int, right: Tree)\nend\nfn size(t: Tree) -> Int\n  ensures result >= 0\n  example size(t: Node(left: Leaf, value: 1, right: Leaf)) == 1\ndo\n  match t\n    case Leaf then 0\n    case Node(left: l, value: _, right: r) then size(t: l) + 1 + size(t: r)\n  end\nend\n';
+  const c = checkSource(src);
+  assert.deepEqual(c.diagnostics, []);
+  assert.ok(c.generated > 0);
 });

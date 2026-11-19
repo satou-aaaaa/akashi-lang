@@ -3,7 +3,7 @@
 import { AkashiError, diag, suggest } from './errors.js';
 
 const KEYWORDS = new Set([
-  'fn', 'do', 'end', 'let', 'if', 'then', 'else', 'when',
+  'fn', 'do', 'end', 'let', 'if', 'then', 'else', 'when', 'type', 'case', 'match',
   'requires', 'ensures', 'example', 'effects',
   'and', 'or', 'not', 'true', 'false',
 ]);
@@ -12,7 +12,10 @@ const ONE_CHAR_OPS = '+-*/%<>=()[],:';
 export const CAPABILITY_TYPES = ['Console', 'Folder'];
 // Html・Sql は「組み立て済みで安全」な値。決まった型紙（文字の書きこみ）に値を差し込む html()・sql() でしか作れない
 export const SAFE_TYPES = ['Html', 'Sql'];
-export const TYPE_NAMES = ['Int', 'Bool', 'Str', 'Unit', 'List', ...SAFE_TYPES, ...CAPABILITY_TYPES];
+// Option・Result は組み込みの「自分で作る型」。null と、見落とされる例外の代わり（docs/PROBLEMS.md）
+export const BUILTIN_DATA = ['Option', 'Result'];
+export const TYPE_NAMES = ['Int', 'Bool', 'Str', 'Unit', 'List', ...BUILTIN_DATA, ...SAFE_TYPES, ...CAPABILITY_TYPES];
+const isUpper = (w) => /^[A-Z]/.test(w);
 
 export function lex(src) {
   const toks = [];
@@ -102,6 +105,9 @@ class Parser {
     this.src = src;
     this.toks = toks;
     this.i = 0;
+    // 型の名前は先に集める（宣言より前の関数でも使えるように）
+    this.userTypes = toks.flatMap((t, i) => (t.t === 'kw' && t.v === 'type' && toks[i + 1]?.t === 'id' ? [toks[i + 1].v] : []));
+    this.typeNames = [...TYPE_NAMES, ...this.userTypes];
   }
   peek(k = 0) { return this.toks[Math.min(this.i + k, this.toks.length - 1)]; }
   is(t, v) { const x = this.peek(); return x.t === t && (v === undefined || x.v === v); }
@@ -126,14 +132,48 @@ class Parser {
 
   program() {
     const fns = [];
+    const types = [];
     while (!this.is('eof')) {
+      if (this.isKw('type')) { types.push(this.typeDecl()); continue; }
       if (this.isKw('end')) {
         throw new AkashiError(diag('E108', "extra 'end'", this.peek().pos, 'every if ... then ... else ... end and every fn ... do ... end needs exactly one end. An else if is a new if inside else, so it needs its own end too: count one end per if'));
       }
-      if (!this.isKw('fn')) this.fail("'fn'", 'every top-level item is a function: fn name(arg: Type) -> Type ... do ... end');
+      if (!this.isKw('fn')) this.fail("'fn' or 'type'", 'every top-level item is a function (fn name(arg: Type) -> Type ... do ... end) or a type (type Name case A(x: Int) case B end)');
       fns.push(this.fn());
     }
-    return { fns };
+    return { fns, types };
+  }
+
+  // type Shape
+  //   case Circle(radius: Int)
+  //   case Empty
+  // end
+  typeDecl() {
+    const pos = this.next().pos;
+    const nameTok = this.expectId('a type name');
+    if (!isUpper(nameTok.v)) this.fail('a type name starting with a capital letter', `write type ${nameTok.v[0].toUpperCase()}${nameTok.v.slice(1)}`, 'E100', nameTok);
+    const variants = [];
+    while (this.isKw('case')) {
+      this.next();
+      const v = this.expectId('a case name');
+      if (!isUpper(v.v)) this.fail('a case name starting with a capital letter', `write case ${v.v[0].toUpperCase()}${v.v.slice(1)}`, 'E100', v);
+      const fields = [];
+      if (this.isOp('(')) {
+        this.next();
+        for (;;) {
+          const f = this.expectId('a field name');
+          this.expectOp(':', `every field needs a type: ${f.v}: Int`);
+          fields.push({ name: f.v, type: this.type(), pos: f.pos });
+          if (this.isOp(',')) { this.next(); continue; }
+          break;
+        }
+        this.expectOp(')', 'close the field list with )');
+      }
+      variants.push({ name: v.v, fields, pos: v.pos });
+    }
+    if (variants.length === 0) this.fail("'case'", `list the cases: type ${nameTok.v} case A(x: Int) case B end (a record is a type with one case)`);
+    this.expectKw('end', `close the type ${nameTok.v} with end`);
+    return { name: nameTok.v, variants, pos };
   }
 
   fn() {
@@ -179,12 +219,21 @@ class Parser {
 
   type() {
     const tok = this.peek();
-    if (!this.is('id')) this.fail('a type', `types are ${TYPE_NAMES.join(', ')}; lists are written List[Int]`, 'E104');
+    const names = this.typeNames;
+    if (!this.is('id')) this.fail('a type', `types are ${names.join(', ')}; lists are written List[Int]`, 'E104');
     this.next();
-    if (!TYPE_NAMES.includes(tok.v)) {
-      const s = suggest(tok.v, TYPE_NAMES);
-      throw new AkashiError(diag('E104', `unknown type '${tok.v}'`, tok.pos, s ? `did you mean ${s}? (types: ${TYPE_NAMES.join(', ')})` : `types are ${TYPE_NAMES.join(', ')}; lists are written List[Int]`));
+    if (!names.includes(tok.v)) {
+      const s = suggest(tok.v, names);
+      const nullish = ['Null', 'None', 'Nil', 'Maybe', 'Optional', 'null', 'nil'].includes(tok.v);
+      throw new AkashiError(diag('E104', `unknown type '${tok.v}'`, tok.pos, nullish ? 'there is no null; a value that may be missing has type Option[T] (Some(value: x) or None)' : s ? `did you mean ${s}? (types: ${names.join(', ')})` : `types are ${names.join(', ')}; lists are written List[Int]; declare your own with type Name case ... end`));
     }
+    if (BUILTIN_DATA.includes(tok.v)) {
+      this.expectOp('[', `write the value type: ${tok.v}[Int]`);
+      const of = this.type();
+      this.expectOp(']', `close the value type: ${tok.v}[Int]`);
+      return { k: 'Data', name: tok.v, args: [of] };
+    }
+    if (this.userTypes.includes(tok.v)) return { k: 'Data', name: tok.v, args: [] };
     if (tok.v === 'List') {
       this.expectOp('[', 'write the item type: List[Int]');
       const of = this.type();
@@ -321,6 +370,37 @@ class Parser {
         result = { k: 'if', cond: arm.cond, thenB: { lets: [], result: arm.value }, elseB: { lets: [], result }, pos: arm.cond.pos };
       }
       return result;
+    }
+    // match：自分で作る型の場合分け。どの case も1回ずつ書く（抜けは E210。何でも受ける _ は無い）
+    if (this.isKw('match')) {
+      this.next();
+      const subject = this.expr();
+      const arms = [];
+      while (this.isKw('case')) {
+        const cpos = this.next().pos;
+        const v = this.expectId('a case name', 'write case Name(field: name) then value');
+        const binds = [];
+        if (this.isOp('(')) {
+          this.next();
+          for (;;) {
+            const f = this.expectId('a field name', 'write the field and a new name for its value: case Circle(radius: r) then ...');
+            this.expectOp(':', `write ${f.v}: and a new name (or _ to ignore it)`);
+            const b = this.expectId('a name for the field value', 'write a new name, or _ to ignore the field');
+            binds.push({ field: f.v, name: b.v, pos: b.pos });
+            if (this.isOp(',')) { this.next(); continue; }
+            break;
+          }
+          this.expectOp(')', 'close the pattern with )');
+        }
+        this.expectKw('then', 'each case line is: case Name(field: name) then value');
+        arms.push({ variant: v.v, binds, value: this.expr(), pos: cpos, vpos: v.pos });
+      }
+      if (this.isKw('else')) {
+        throw new AkashiError(diag('E211', "'match' has no else", this.peek().pos, 'write one case line per case of the type instead of else; then adding a case later shows every match that must handle it'));
+      }
+      if (arms.length === 0) this.fail("'case'", 'write the cases: match x case A then ... case B then ... end');
+      this.expectKw('end', 'close the match with end');
+      return { k: 'match', subject, arms, pos: tok.pos };
     }
     if (this.isKw('if')) {
       this.next();

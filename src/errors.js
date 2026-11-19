@@ -18,6 +18,9 @@ export const CODES = {
   E203: 'name reused',
   E206: 'positional argument',
   E207: 'arguments out of order',
+  E210: 'match misses a case',
+  E211: 'match case that does not belong (else, _, unknown or repeated case)',
+  E212: 'pattern fields do not match the case',
   E300: 'capability not given',
   E301: 'no main',
   E302: 'unknown effect (retired in v0.2: effects were replaced by capabilities)',
@@ -37,7 +40,7 @@ export const CODES = {
   R505: 'recursion too deep',
   R506: 'index out of range',
   R507: 'path escapes the folder',
-  R508: 'file not readable',
+  R508: 'file not readable (retired in v0.5: read_text returns Result[Str] and a missing file is Err)',
   R509: 'capability not granted',
   R510: 'template holes and values do not match',
   R511: 'ensures fails for a generated input',
@@ -45,7 +48,7 @@ export const CODES = {
 };
 
 // もう出さないコード（意味は変えず、番号を使い回さない）
-export const RETIRED = ['E302'];
+export const RETIRED = ['E302', 'R508'];
 
 export function diag(code, message, pos, fix, extra = {}) {
   return {
