@@ -97,3 +97,12 @@ test('docs/ERRORS.md is generated from examples/bad (run node scripts/gen-errors
   const { render } = await import('../scripts/gen-errors.mjs');
   assert.equal(readFileSync(new URL('../docs/ERRORS.md', import.meta.url), 'utf8'), render());
 });
+
+test('the complete example in docs/SPEC.md runs', async () => {
+  const { readFileSync } = await import('node:fs');
+  const spec = readFileSync(new URL('../docs/SPEC.md', import.meta.url), 'utf8');
+  const code = spec.split('## Complete example')[1].split('```')[1];
+  const r = runSource(code);
+  assert.equal(r.ok, true, JSON.stringify(r.diagnostics));
+  assert.equal(r.output, 'total = 12\n');
+});
