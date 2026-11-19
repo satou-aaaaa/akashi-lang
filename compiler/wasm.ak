@@ -324,7 +324,7 @@ end
 # data：文字の定数を並べたバイト（DATA_START = 48 から）・strings：文字 → 置き場所・tags：欄の無い case の置き場所
 # gens：作った手伝いの関数・gen_idx：鍵 → 番号・locals：いま作っている関数の局所変数・nparams：その引数の数・err：扱えないもの（E600）
 type Cg
-  case Cg(data: List[Int], strings: Dict[Int], data_end: Int, tags: Dict[Int], gens: List[Func], gen_idx: Dict[Int], locals: List[Int], nparams: Int, err: Str)
+  case Cg(data: List[List[Int]], strings: Dict[Int], data_end: Int, tags: Dict[Int], gens: List[Func], gen_idx: Dict[Int], locals: List[Int], nparams: Int, err: Str)
 end
 
 fn cg_new() -> Cg
@@ -355,8 +355,16 @@ fn cg_data(cg: Cg) -> List[Int]
   example cg_data(cg: cg_new()) == []
 do
   match cg
-    case Cg(data: d, strings: _, data_end: _, tags: _, gens: _, gen_idx: _, locals: _, nparams: _, err: _) then d
+    case Cg(data: d, strings: _, data_end: _, tags: _, gens: _, gen_idx: _, locals: _, nparams: _, err: _) then concat(lists: d)
   end
+end
+
+# 並びの塊に1つ足す。64 個たまったら1つにまとめる（毎回ぜんぶを写すと、文字の数の2乗のメモリになるため。2026-11-19）
+fn add_chunk(chunks: List[List[Int]], piece: List[Int]) -> List[List[Int]]
+  ensures len(list: result) >= 1
+  example add_chunk(chunks: [[1], [2]], piece: [3]) == [[1], [2], [3]]
+do
+  append(list: if len(list: chunks) >= 64 then [concat(lists: chunks)] else chunks end, item: piece)
 end
 
 fn cg_err(cg: Cg) -> Str
@@ -458,7 +466,7 @@ fn put_str(cg: Cg, bytes: List[Int], text: Str) -> At
   example at_at(a: put_str(cg: cg_new(), bytes: [97], text: "a")) == 48
 do
   match cg
-    case Cg(data: d, strings: s, data_end: de, tags: t, gens: g, gen_idx: gi, locals: l, nparams: np, err: e) then At(at: de, cg: Cg(data: concat(lists: [d, u32le(n: len(list: bytes)), bytes, zeros(n: pad4(n: 4 + len(list: bytes)))]), strings: dict_put(dict: s, key: text, value: de), data_end: de + 4 + len(list: bytes) + pad4(n: 4 + len(list: bytes)), tags: t, gens: g, gen_idx: gi, locals: l, nparams: np, err: e))
+    case Cg(data: d, strings: s, data_end: de, tags: t, gens: g, gen_idx: gi, locals: l, nparams: np, err: e) then At(at: de, cg: Cg(data: add_chunk(chunks: d, piece: concat(lists: [u32le(n: len(list: bytes)), bytes, zeros(n: pad4(n: 4 + len(list: bytes)))])), strings: dict_put(dict: s, key: text, value: de), data_end: de + 4 + len(list: bytes) + pad4(n: 4 + len(list: bytes)), tags: t, gens: g, gen_idx: gi, locals: l, nparams: np, err: e))
   end
 end
 
@@ -503,7 +511,7 @@ do
     case Cg(data: d, strings: s, data_end: de, tags: tg, gens: g, gen_idx: gi, locals: l, nparams: np, err: e) then
       match dict_get(dict: tg, key: to_str(value: index))
         case Some(value: a) then At(at: a, cg: cg)
-        case None then At(at: de + pad8(n: de), cg: Cg(data: concat(lists: [d, zeros(n: pad8(n: de)), [index % 256, index / 256 % 256, 0, 0, 0, 0, 0, 0]]), strings: s, data_end: de + pad8(n: de) + 8, tags: dict_put(dict: tg, key: to_str(value: index), value: de + pad8(n: de)), gens: g, gen_idx: gi, locals: l, nparams: np, err: e))
+        case None then At(at: de + pad8(n: de), cg: Cg(data: add_chunk(chunks: d, piece: zeros(n: pad8(n: de)) ++ [index % 256, index / 256 % 256, 0, 0, 0, 0, 0, 0]), strings: s, data_end: de + pad8(n: de) + 8, tags: dict_put(dict: tg, key: to_str(value: index), value: de + pad8(n: de)), gens: g, gen_idx: gi, locals: l, nparams: np, err: e))
       end
   end
 end

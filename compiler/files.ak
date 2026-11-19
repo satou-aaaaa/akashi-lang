@@ -11,8 +11,18 @@ end
 fn load_program(folder: Folder, main_name: Str) -> Loaded
 do
   match read_text(from: folder, path: main_name)
-    case Ok(value: text) then parse_files(got: gather(folder: folder, files: [SrcFile(name: "", text: text)], k: 0, err: first_lex_error(name: "", text: text)))
+    case Ok(value: text) then start_gather(folder: folder, text: text, got: lex(text: text))
     case Err(message: m) then Loaded(items: [], err: "cannot read: " ++ m)
+  end
+end
+
+# main のファイルを字句に分けてから、use をたどる。字句はファイルごとに1回だけ作り、SrcFile に持たせる
+# （前は同じファイルを4回字句に分けていた。自分のコンパイルでメモリの多くを使っていた。2026-11-19）
+fn start_gather(folder: Folder, text: Str, got: Result[List[Token]]) -> Loaded
+do
+  match got
+    case Err(message: m) then Loaded(items: [], err: m)
+    case Ok(value: ts) then parse_files(got: gather(folder: folder, files: [SrcFile(name: "", text: text, toks: ts)], k: 0, err: ""))
   end
 end
 
@@ -41,7 +51,7 @@ end
 
 # 読んだファイル：名前（main のファイルは ""）・中身・字句
 type SrcFile
-  case SrcFile(name: Str, text: Str)
+  case SrcFile(name: Str, text: Str, toks: List[Token])
 end
 
 # 読み終わったファイルと、止まったときのエラー（"" なら止まっていない）
@@ -49,30 +59,38 @@ type Gathered
   case Gathered(files: List[SrcFile], err: Str)
 end
 
+# 字句に分けて SrcFile を作る（分けられなければ字句は空。例のための近道）
+fn src_file(name: Str, text: Str) -> SrcFile
+  ensures true
+  example src_file(name: "a.ak", text: "x") == SrcFile(name: "a.ak", text: "x", toks: lex_ok(text: "x"))
+do
+  SrcFile(name: name, text: text, toks: lex_ok(text: text))
+end
+
 fn sf_name(f: SrcFile) -> Str
   ensures true
-  example sf_name(f: SrcFile(name: "a.ak", text: "")) == "a.ak"
+  example sf_name(f: src_file(name: "a.ak", text: "")) == "a.ak"
 do
   match f
-    case SrcFile(name: n, text: _) then n
+    case SrcFile(name: n, text: _, toks: _) then n
   end
 end
 
 fn sf_text(f: SrcFile) -> Str
   ensures true
-  example sf_text(f: SrcFile(name: "", text: "x")) == "x"
+  example sf_text(f: src_file(name: "", text: "x")) == "x"
 do
   match f
-    case SrcFile(name: _, text: t) then t
+    case SrcFile(name: _, text: t, toks: _) then t
   end
 end
 
 fn sf_toks(f: SrcFile) -> List[Token]
   ensures true
-  example len(list: sf_toks(f: SrcFile(name: "", text: "x"))) == 1
+  example len(list: sf_toks(f: src_file(name: "", text: "x"))) == 1
 do
   match f
-    case SrcFile(name: _, text: t) then lex_ok(text: t)
+    case SrcFile(name: _, text: _, toks: ts) then ts
   end
 end
 
@@ -85,24 +103,13 @@ do
   if name == "" then message else name ++ ": " ++ message end
 end
 
-fn first_lex_error(name: Str, text: Str) -> Str
-  ensures true
-  example first_lex_error(name: "a.ak", text: "1.5") == "a.ak: E101 1:1 decimal numbers are not supported"
-  example first_lex_error(name: "", text: "x") == ""
-do
-  match lex(text: text)
-    case Ok(value: _) then ""
-    case Err(message: m) then in_file(name: name, message: m)
-  end
-end
-
 fn sf_at(files: List[SrcFile], k: Int) -> SrcFile
   ensures true
   example sf_name(f: sf_at(files: [], k: 0)) == ""
 do
   match at(list: files, index: k)
     case Some(value: f) then f
-    case None then SrcFile(name: "", text: "")
+    case None then SrcFile(name: "", text: "", toks: [])
   end
 end
 
@@ -224,8 +231,16 @@ do
     else
     match read_text(from: folder, path: rel)
       case Err(message: _) then Gathered(files: files, err: in_file(name: from, message: "E114 " ++ place ++ " used file '" ++ rel ++ "' was not found"))
-      case Ok(value: text) then if first_lex_error(name: rel, text: text) != "" then Gathered(files: files, err: first_lex_error(name: rel, text: text)) else add_uses(folder: folder, files: append(list: files, item: SrcFile(name: rel, text: text)), from: from, uses: uses, i: i + 1) end
+      case Ok(value: text) then add_lexed(folder: folder, files: files, from: from, uses: uses, i: i, rel: rel, text: text, got: lex(text: text))
     end
+  end
+end
+
+fn add_lexed(folder: Folder, files: List[SrcFile], from: Str, uses: List[UseLine], i: Int, rel: Str, text: Str, got: Result[List[Token]]) -> Gathered
+do
+  match got
+    case Err(message: m) then Gathered(files: files, err: in_file(name: rel, message: m))
+    case Ok(value: ts) then add_uses(folder: folder, files: append(list: files, item: SrcFile(name: rel, text: text, toks: ts)), from: from, uses: uses, i: i + 1)
   end
 end
 
@@ -235,11 +250,11 @@ end
 
 fn parse_step(p: Parsing, f: SrcFile) -> Parsing
   ensures true
-  example parse_step(p: Parsing(types: [], items: [], err: "x"), f: SrcFile(name: "", text: "")) == Parsing(types: [], items: [], err: "x")
+  example parse_step(p: Parsing(types: [], items: [], err: "x"), f: src_file(name: "", text: "")) == Parsing(types: [], items: [], err: "x")
 do
   match p
     case Parsing(types: ts, items: its, err: e) then if e != "" then p else
-      match parse(text: sf_text(f: f), other_types: ts)
+      match parse_lexed(text: sf_text(f: f), toks: sf_toks(f: f), other_types: ts)
         case Err(message: m) then Parsing(types: ts, items: its, err: in_file(name: sf_name(f: f), message: m))
         case Ok(value: prog) then Parsing(types: ts, items: its ++ items_of(file: sf_name(f: f), program: prog), err: used_main(name: sf_name(f: f), prog: prog))
       end

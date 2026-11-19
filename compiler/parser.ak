@@ -1227,8 +1227,16 @@ fn parse(text: Str, other_types: List[Str]) -> Result[Node]
 do
   match lex(text: text)
     case Err(message: m) then Err(message: m)
-    case Ok(value: ts) then from_parsed(r: p_program(ps: make_ps(text: text, toks: ts, other_types: other_types)))
+    case Ok(value: ts) then parse_lexed(text: text, toks: ts, other_types: other_types)
   end
+end
+
+# 字句に分け終わったものを読む（ファイルを読むときは、字句を1回だけ作って使い回す）
+fn parse_lexed(text: Str, toks: List[Token], other_types: List[Str]) -> Result[Node]
+  ensures true
+  example parse_lexed(text: "1", toks: [Token(kind: "int", text: "1", line: 1, col: 1, end_col: 2)], other_types: []) == Err(message: "E100 1:1 expected 'fn' or 'type' but found '1'")
+do
+  from_parsed(r: p_program(ps: make_ps(text: text, toks: toks, other_types: other_types)))
 end
 
 fn from_parsed(r: Parsed) -> Result[Node]
