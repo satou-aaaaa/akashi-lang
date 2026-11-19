@@ -77,7 +77,7 @@ class Unsupported extends Error {
 const LIST_BUILTINS = ['len', 'get', 'at', 'range', 'append', 'map', 'filter', 'fold', 'find', 'any', 'all', 'reverse', 'take', 'drop', 'sort', 'sum', 'max', 'min'];
 const TEXT_BUILTINS = ['chars', 'split', 'join', 'contains', 'starts_with', 'ends_with', 'lines', 'html', 'html_text', 'html_join', 'sql'];
 const CAPS = ['Console', 'Folder']; // 鍵。実行時には何も渡さない（Folder は WASI の fd 3）
-const SUPPORTED_BUILTINS = ['print', 'to_str', 'str_len', 'parse_int', 'trim', 'read_text', ...LIST_BUILTINS, ...TEXT_BUILTINS];
+const SUPPORTED_BUILTINS = ['print', 'to_str', 'str_len', 'parse_int', 'trim', 'read_text', 'slice', 'code_of', 'char_of', ...LIST_BUILTINS, ...TEXT_BUILTINS];
 
 function valType(t) {
   t = prune(t);
@@ -548,6 +548,32 @@ class Compiler {
       case 'str_len': return [...A('text'), ...op.call(this.h.strlen)];
       case 'trim': return [...A('text'), ...op.call(this.trimFn())];
       case 'parse_int': return [...A('text'), ...op.call(this.parseIntFn())];
+      case 'slice': {
+        const [t, a, b] = [ctx.local(I32), ctx.local(I32), ctx.local(I32)];
+        const [from, to] = [ctx.local(I64), ctx.local(I64)];
+        return [
+          ...A('text'), ...op.localSet(t), ...A('from'), ...op.localSet(from), ...A('to'), ...op.localSet(to),
+          ...op.localGet(t), ...op.localGet(from), ...op.call(this.cpOffsetFn()), ...op.localSet(a),
+          ...op.localGet(t), ...op.localGet(to), ...op.call(this.cpOffsetFn()), ...op.localSet(b),
+          ...op.localGet(a), ...op.i32(0), ...op.i32LtS, ...op.localGet(b), ...op.i32(0), ...op.i32LtS, ...op.i32Or, ...op.localGet(from), ...op.localGet(to), ...op.i64GtS, ...op.i32Or,
+          ...op.if(EMPTY), ...this.failAt('R506', 'slice is out of range', e.pos), ...op.end,
+          ...op.localGet(t), ...op.localGet(a), ...op.localGet(b), ...op.call(this.sliceFn()),
+        ];
+      }
+      case 'code_of': {
+        const c = ctx.local(I64);
+        return [...A('char'), ...op.call(this.codeOfFn()), ...op.localTee(c), ...op.i64(0), ...op.i64LtS,
+          ...op.if(EMPTY), ...this.failAt('R506', 'code_of needs exactly one character', e.pos), ...op.end, ...op.localGet(c)];
+      }
+      case 'char_of': {
+        const c = ctx.local(I64);
+        return [
+          ...A('code'), ...op.localTee(c), ...op.i64(0), ...op.i64LtS, ...op.localGet(c), ...op.i64(0x10ffff), ...op.i64GtS, ...op.i32Or,
+          ...op.localGet(c), ...op.i64(0xd800), ...op.i64GeS, ...op.localGet(c), ...op.i64(0xdfff), ...op.i64LeS, ...op.i32And, ...op.i32Or,
+          ...op.if(EMPTY), ...this.failAt('R506', 'not a character code', e.pos), ...op.end,
+          ...op.localGet(c), ...op.call(this.charOfFn()),
+        ];
+      }
       case 'read_text': {
         const r = ctx.local(I32);
         return [
@@ -1411,6 +1437,66 @@ class Compiler {
         ...op.localGet(i), ...op.localGet(need), ...op.i32Add, ...op.i32(1), ...op.i32Add, ...op.localSet(i), ...op.br(0),
         ...op.end, ...op.end,
         ...op.i32(1),
+      ];
+    });
+  }
+  // s の k 文字目（コードポイント）が始まるバイトの場所。k が文字の数と同じなら長さ。超えるか負なら -1
+  cpOffsetFn() {
+    return this.gen('cp offset', [I32, I64], [I32], (local) => {
+      const [n, i, c, b] = [local(I32), local(I32), local(I64), local(I32)];
+      return [
+        ...op.localGet(1), ...op.i64(0), ...op.i64LtS, ...op.if(EMPTY), ...op.i32(-1), ...op.return, ...op.end,
+        ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n),
+        ...op.block(EMPTY), ...op.loop(EMPTY),
+        ...op.localGet(c), ...op.localGet(1), ...op.i64Eq, ...op.if(EMPTY), ...op.localGet(i), ...op.return, ...op.end,
+        ...op.localGet(i), ...op.localGet(n), ...op.i32GeU, ...op.brIf(1),
+        // 次の文字の始まりへ（続きのバイト 10xxxxxx を飛ばす）
+        ...op.localGet(i), ...op.i32(1), ...op.i32Add, ...op.localSet(i),
+        ...op.block(EMPTY), ...op.loop(EMPTY),
+        ...op.localGet(i), ...op.localGet(n), ...op.i32GeU, ...op.brIf(1),
+        ...op.localGet(0), ...op.localGet(i), ...op.i32Add, ...op.i32Load8u(4), ...op.localTee(b), ...op.i32(0xc0), ...op.i32And, ...op.i32(0x80), ...op.i32Ne, ...op.brIf(1),
+        ...op.localGet(i), ...op.i32(1), ...op.i32Add, ...op.localSet(i), ...op.br(0),
+        ...op.end, ...op.end,
+        ...op.localGet(c), ...op.i64(1), ...op.i64Add, ...op.localSet(c), ...op.br(0),
+        ...op.end, ...op.end,
+        ...op.i32(-1),
+      ];
+    });
+  }
+
+  // 1文字の文字から、その文字のコード。1文字でなければ -1
+  codeOfFn() {
+    return this.gen('code of', [I32], [I64], (local) => {
+      const [n, b0, w] = [local(I32), local(I32), local(I32)];
+      const cont = (k) => [...op.localGet(0), ...op.i32Load8u(4 + k), ...op.i32(63), ...op.i32And];
+      const shl = (code, sh) => [...code, ...op.i32(sh), ...op.i32Shl];
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localTee(n), ...op.i32Eqz, ...op.if(EMPTY), ...op.i64(-1), ...op.return, ...op.end,
+        ...op.localGet(0), ...op.i32Load8u(4), ...op.localTee(b0), ...op.i32(0x80), ...op.i32LtU,
+        ...op.if(I32), ...op.i32(1), ...op.else, ...op.localGet(b0), ...op.i32(0xe0), ...op.i32LtU,
+        ...op.if(I32), ...op.i32(2), ...op.else, ...op.localGet(b0), ...op.i32(0xf0), ...op.i32LtU, ...op.if(I32), ...op.i32(3), ...op.else, ...op.i32(4), ...op.end, ...op.end, ...op.end,
+        ...op.localTee(w), ...op.localGet(n), ...op.i32Ne, ...op.if(EMPTY), ...op.i64(-1), ...op.return, ...op.end,
+        ...op.localGet(w), ...op.i32(1), ...op.i32Eq, ...op.if(EMPTY), ...op.localGet(b0), ...op.i64ExtendI32U, ...op.return, ...op.end,
+        ...op.localGet(w), ...op.i32(2), ...op.i32Eq, ...op.if(EMPTY), ...shl([...op.localGet(b0), ...op.i32(31), ...op.i32And], 6), ...cont(1), ...op.i32Or, ...op.i64ExtendI32U, ...op.return, ...op.end,
+        ...op.localGet(w), ...op.i32(3), ...op.i32Eq, ...op.if(EMPTY), ...shl([...op.localGet(b0), ...op.i32(15), ...op.i32And], 12), ...shl(cont(1), 6), ...op.i32Or, ...cont(2), ...op.i32Or, ...op.i64ExtendI32U, ...op.return, ...op.end,
+        ...shl([...op.localGet(b0), ...op.i32(7), ...op.i32And], 18), ...shl(cont(1), 12), ...op.i32Or, ...shl(cont(2), 6), ...op.i32Or, ...cont(3), ...op.i32Or, ...op.i64ExtendI32U,
+      ];
+    });
+  }
+
+  // コードから1文字の文字（UTF-8 で 1〜4 バイト）。範囲は呼ぶ側で確かめる
+  charOfFn() {
+    return this.gen('char of', [I64], [I32], (local) => {
+      const [c, p] = [local(I32), local(I32)];
+      const mk = (len) => [...op.i32(4 + len), ...op.call(this.h.alloc), ...op.localTee(p), ...op.i32(len), ...op.i32Store(0)];
+      const put = (k, code) => [...op.localGet(p), ...code, ...op.i32Store8(4 + k)];
+      const bits = (sh, mask, lead) => [...op.localGet(c), ...(sh ? [...op.i32(sh), ...op.i32ShrU] : []), ...op.i32(mask), ...op.i32And, ...op.i32(lead), ...op.i32Or];
+      return [
+        ...op.localGet(0), ...op.i32WrapI64, ...op.localSet(c),
+        ...op.localGet(c), ...op.i32(0x80), ...op.i32LtU, ...op.if(EMPTY), ...mk(1), ...put(0, op.localGet(c)), ...op.localGet(p), ...op.return, ...op.end,
+        ...op.localGet(c), ...op.i32(0x800), ...op.i32LtU, ...op.if(EMPTY), ...mk(2), ...put(0, bits(6, 31, 0xc0)), ...put(1, bits(0, 63, 0x80)), ...op.localGet(p), ...op.return, ...op.end,
+        ...op.localGet(c), ...op.i32(0x10000), ...op.i32LtU, ...op.if(EMPTY), ...mk(3), ...put(0, bits(12, 15, 0xe0)), ...put(1, bits(6, 63, 0x80)), ...put(2, bits(0, 63, 0x80)), ...op.localGet(p), ...op.return, ...op.end,
+        ...mk(4), ...put(0, bits(18, 7, 0xf0)), ...put(1, bits(12, 63, 0x80)), ...put(2, bits(6, 63, 0x80)), ...put(3, bits(0, 63, 0x80)), ...op.localGet(p),
       ];
     });
   }

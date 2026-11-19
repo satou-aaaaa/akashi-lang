@@ -84,6 +84,10 @@ export const BUILTINS = {
   sql: () => ({ params: [['template', STR], ['values', List(STR)]], ret: SQL }),
   len: () => ({ params: [['list', List(fresh())]], ret: INT }),
   str_len: () => ({ params: [['text', STR]], ret: INT }),
+  // 文字（コードポイント）単位で切り出す・数にする・数から作る（字句解析を Akashi で書くため。docs/compiler.md 段階4）
+  slice: () => ({ params: [['text', STR], ['from', INT], ['to', INT]], ret: STR }),
+  code_of: () => ({ params: [['char', STR]], ret: INT }),
+  char_of: () => ({ params: [['code', INT]], ret: STR }),
   to_str: () => ({ params: [['value', fresh()]], ret: STR }),
   range: () => ({ params: [['from', INT], ['to', INT]], ret: List(INT) }),
   get: () => { const a = fresh(); return { params: [['list', List(a)], ['index', INT]], ret: a }; },

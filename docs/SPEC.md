@@ -154,6 +154,9 @@ end
 | `sql(template: "...", values: [...])` | Sql (values: List[Str]) |
 | `len(list: xs)` | List[T] → Int |
 | `str_len(text: s)` | Str → Int |
+| `slice(text: s, from: a, to: b)` | Str, characters a..b-1 (code points); out of range is R506 |
+| `code_of(char: c)` | Int, the code point of one character (R506 if not exactly one) |
+| `char_of(code: n)` | Str, one character from a code point (R506 if not a valid code point) |
 | `to_str(value: x)` | any → Str |
 | `range(from: a, to: b)` | List[Int] from a up to b-1 |
 | `at(list: xs, index: i)` | Option[T]; `None` when i is out of range (prefer this) |
