@@ -201,9 +201,16 @@ end
 ```bash
 node bin/akashi.js check file.ak [--json]
 node bin/akashi.js run file.ak [--json] [--allow-read <フォルダ>]
+node bin/akashi.js build file.ak [-o out.wasm] [--json]
+node bin/akashi.js wasm out.wasm
+node bin/akashi.js fmt file.ak [--check]
 node bin/akashi.js explain E210
 node bin/akashi.js spec
 ```
+
+- `build` は、`check` が通ったプログラムを WebAssembly にします。まだ扱えない書き方は E600 です（[コンパイラ](compiler.md)）。
+- `wasm` は、コンパイルしたものを動かします。渡すのは画面と標準エラーだけです。
+- `fmt` は、書式を決まった形に整えます（字下げは空白2つ、語のあいだの空白、空行は1つまで、fn と type のあいだに空行1つ）。行の分け方とコメントは変えません。`--check` は書きかえずに、整っていないファイルを知らせます。
 
 - 終わりのコードは、通れば 0、エラーなら 1、使い方の誤りなら 2 です。
 - `--json` では `{ ok, diagnostics: [{ code, kind, message, line, col, fix }], ... }` を出します。この形は変えません。

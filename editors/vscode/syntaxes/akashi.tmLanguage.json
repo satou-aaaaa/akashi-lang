@@ -1,0 +1,55 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Akashi",
+  "scopeName": "source.akashi",
+  "fileTypes": ["ak"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#number" },
+    { "include": "#declaration" },
+    { "include": "#keyword" },
+    { "include": "#type" },
+    { "include": "#call" },
+    { "include": "#operator" }
+  ],
+  "repository": {
+    "comment": { "name": "comment.line.number-sign.akashi", "match": "#.*$" },
+    "string": {
+      "name": "string.quoted.double.akashi",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [{ "name": "constant.character.escape.akashi", "match": "\\\\[nt\"\\\\]" }]
+    },
+    "number": { "name": "constant.numeric.integer.akashi", "match": "\\b[0-9]+\\b" },
+    "declaration": {
+      "patterns": [
+        { "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)", "captures": { "1": { "name": "keyword.declaration.function.akashi" }, "2": { "name": "entity.name.function.akashi" } } },
+        { "match": "\\b(type)\\s+([A-Z][A-Za-z0-9_]*)", "captures": { "1": { "name": "keyword.declaration.type.akashi" }, "2": { "name": "entity.name.type.akashi" } } },
+        { "match": "\\b(let)\\s+([A-Za-z_][A-Za-z0-9_]*)", "captures": { "1": { "name": "keyword.declaration.akashi" }, "2": { "name": "variable.other.akashi" } } }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        { "name": "keyword.control.akashi", "match": "\\b(do|end|if|then|else|when|match|case)\\b" },
+        { "name": "keyword.other.contract.akashi", "match": "\\b(requires|ensures|example)\\b" },
+        { "name": "keyword.operator.logical.akashi", "match": "\\b(and|or|not)\\b" },
+        { "name": "constant.language.boolean.akashi", "match": "\\b(true|false)\\b" },
+        { "name": "invalid.deprecated.akashi", "match": "\\beffects\\b" },
+        { "name": "variable.language.result.akashi", "match": "\\bresult\\b" }
+      ]
+    },
+    "type": {
+      "patterns": [
+        { "name": "support.type.capability.akashi", "match": "\\b(Console|Folder)\\b" },
+        { "name": "support.type.builtin.akashi", "match": "\\b(Int|Bool|Str|Unit|List|Option|Result|Html|Sql)\\b" },
+        { "name": "entity.name.type.akashi", "match": "\\b[A-Z][A-Za-z0-9_]*\\b" }
+      ]
+    },
+    "call": {
+      "match": "\\b([a-z_][A-Za-z0-9_]*)(?=\\()",
+      "captures": { "1": { "name": "entity.name.function.call.akashi" } }
+    },
+    "operator": { "name": "keyword.operator.akashi", "match": "->|==|!=|<=|>=|\\+\\+|[-+*/%<>=]" }
+  }
+}

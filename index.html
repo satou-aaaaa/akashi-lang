@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Akashi playground</title>
+<meta name="description" content="AI が書いても間違えにくく危なくなりにくい言語 Akashi を、ブラウザだけで書いて検査して動かせるページ。">
+<link rel="stylesheet" href="playground/style.css">
+<script type="module" src="playground/app.js"></script>
+</head>
+<body>
+<header>
+  <h1>Akashi <span>playground</span></h1>
+  <p>AI が書いても間違えにくく、危なくなりにくい言語。ここで書いたものは、あなたのブラウザの中だけで検査・実行します（どこにも送りません）。</p>
+  <nav>
+    <a href="https://github.com/satou-aaaaa/akashi-lang/blob/main/docs/tutorial.md">入門</a>
+    <a href="https://github.com/satou-aaaaa/akashi-lang/blob/main/docs/reference.md">言語の決まり</a>
+    <a href="https://github.com/satou-aaaaa/akashi-lang/blob/main/docs/ERRORS.md">エラー番号</a>
+    <a href="https://github.com/satou-aaaaa/akashi-lang">GitHub</a>
+  </nav>
+</header>
+<main>
+  <section class="editor" aria-label="コード">
+    <div class="bar">
+      <label for="example">見本</label>
+      <select id="example"></select>
+      <span class="grow"></span>
+      <button id="share" type="button" title="今のコードを URL に入れて写す">リンクを写す</button>
+    </div>
+    <textarea id="code" wrap="off" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Akashi のコード"></textarea>
+    <div class="bar actions">
+      <button id="check" type="button">検査</button>
+      <button id="run" type="button" class="primary">実行</button>
+      <button id="wasm" type="button" title="WebAssembly にコンパイルして実行">Wasm で実行</button>
+      <button id="fmt" type="button">整える</button>
+      <span id="status" role="status" aria-live="polite"></span>
+    </div>
+  </section>
+  <section class="result" aria-label="結果">
+    <h2>出力</h2>
+    <pre id="output" tabindex="0"></pre>
+    <h2>エラー</h2>
+    <ul id="diags"></ul>
+  </section>
+</main>
+<footer>
+  <p><kbd>Ctrl</kbd>+<kbd>Enter</kbd> で実行。コードは URL の # の後ろにだけ入ります。MIT ライセンス。</p>
+</footer>
+</body>
+</html>

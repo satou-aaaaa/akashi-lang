@@ -39,6 +39,7 @@
 | [E311](#e311) | template holes and values do not match |
 | [E401](#e401) | missing ensures |
 | [E402](#e402) | missing example |
+| [E600](#e600) | not supported by the compiler yet (akashi build) |
 | [R500](#r500) | requires failed |
 | [R501](#r501) | ensures failed |
 | [R502](#r502) | example failed |
@@ -443,6 +444,10 @@ fn inc(x: Int) -> Int ensures result > x do x + 1 end
 - message: pure function 'inc' has no example
 - fix: add at least one example before do, e.g. example inc(x: <value>) == <expected>
 
+## E600
+
+not supported by the compiler yet (akashi build).
+
 ## R500
 
 requires failed.
@@ -465,6 +470,7 @@ fn report_abs(console: Console, x: Int) -> Int ensures result >= 0 do
   print(to: console, value: x)
   x
 end
+
 fn main(console: Console) -> Unit do print(to: console, value: report_abs(console: console, x: -5)) end
 ```
 

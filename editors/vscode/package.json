@@ -1,0 +1,28 @@
+{
+  "name": "akashi-language",
+  "displayName": "Akashi",
+  "description": "Syntax highlighting for the Akashi language (.ak)",
+  "version": "0.6.0",
+  "publisher": "satou-aaaaa",
+  "license": "MIT",
+  "private": true,
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "akashi",
+        "aliases": ["Akashi", "akashi"],
+        "extensions": [".ak"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "akashi",
+        "scopeName": "source.akashi",
+        "path": "./syntaxes/akashi.tmLanguage.json"
+      }
+    ]
+  }
+}

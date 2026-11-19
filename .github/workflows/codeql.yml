@@ -1,0 +1,24 @@
+name: CodeQL
+
+# 処理系（JavaScript）とワークフローの脆弱性を CodeQL で調べる（Claude は使わない。公開リポジトリは無料）。中身は共通部品 satou-aaaaa/shared-workflows。
+# fail-on-alert: true なので、指摘が1件でもあれば検査が失敗し、PR を止める（satou さん「脆弱なものは使わないでほしい」2026-11-19。docs/security.md「使う道具の決まり」）。
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 21 * * 0'   # 毎週月曜 06:17 JST（新しく見つかるようになった種類も拾う）
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    uses: satou-aaaaa/shared-workflows/.github/workflows/codeql.yml@main
+    with:
+      languages: javascript-typescript,actions
+      fail-on-alert: true

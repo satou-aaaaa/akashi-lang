@@ -1,6 +1,5 @@
 // 実行。requires / ensures は毎回の呼び出しで確かめる。example は check のときに全部回す。
-import { realpathSync, readFileSync, statSync } from 'node:fs';
-import { resolve, sep, isAbsolute } from 'node:path';
+// Node の部品は使わない（ブラウザの遊べるページでも同じものを動かす）。ファイルを読むのは Folder の鍵が持つ read（src/folder.js）
 import { AkashiError, diag } from './errors.js';
 import { BUILTIN_TYPES } from './check.js';
 
@@ -134,23 +133,11 @@ export class Machine {
   // 読めないとき（無い・フォルダ・文字が読めない）は Err を返す。フォルダの外を指すのは書き方の誤りなので止める（R507）
   // Folder の権利で読めるのは、渡されたフォルダの中だけ（.. や絶対パス、外を指すリンクは止める）
   readText(folder, path, pos) {
-    const bad = path === '' || isAbsolute(path) || path.includes('\\') || path.includes('\0') || path.split('/').some((x) => x === '..');
+    const bad = path === '' || path.startsWith('/') || /^[A-Za-z]:/.test(path) || path.includes('\\') || path.includes('\0') || path.split('/').some((x) => x === '..');
     if (bad) this.fail('R507', `path '${path}' is not inside the folder`, pos, 'use a relative path without .. such as "data/input.txt"');
-    let real;
-    try {
-      real = realpathSync(resolve(folder.root, path));
-    } catch {
-      return err(`'${path}' does not exist`);
-    }
-    if (real !== folder.root && !real.startsWith(folder.root + sep)) {
-      this.fail('R507', `path '${path}' points outside the folder (through a link)`, pos, 'read only files that are really inside the folder');
-    }
-    if (!statSync(real).isFile()) return err(`'${path}' is not a file`);
-    try {
-      return { tag: 'Ok', fields: { value: new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(real)) } };
-    } catch {
-      return err(`'${path}' could not be read as UTF-8 text`);
-    }
+    const r = folder.read(path); // { text } か { missing } か { escape }
+    if (r.escape) this.fail('R507', `path '${path}' points outside the folder (through a link)`, pos, 'read only files that are really inside the folder');
+    return r.text !== undefined ? { tag: 'Ok', fields: { value: r.text } } : err(r.missing);
   }
 
   apply(ref, values, pos) {

@@ -107,7 +107,7 @@ test('overflow is an error, not a wrong number', () => {
 
 test('every error code has a sample in examples/bad or a test here', () => {
   const samples = readdirSync(new URL('../examples/bad/', import.meta.url)).map((f) => f.slice(0, 4).toUpperCase());
-  const coveredHere = ['E301', 'R504', ...RETIRED];
+  const coveredHere = ['E301', 'R504', 'E600', ...RETIRED]; // E600 は test/compile.test.js
   for (const code of Object.keys(CODES)) {
     assert.ok(samples.includes(code) || coveredHere.includes(code), `${code} needs a sample in examples/bad/`);
   }

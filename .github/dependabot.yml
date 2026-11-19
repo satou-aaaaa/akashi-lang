@@ -1,0 +1,14 @@
+# 依存の更新と脆弱性の知らせ（無料）。今は依存がゼロなので、ふだんは何も来ない。
+# 依存を足すことは原則しない（docs/security.md「使う道具の決まり」）。足したときに、ここで古い・脆弱な版を見張る。
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+  # ワークフローの Actions（共通部品 shared-workflows の呼び出しは @main なので対象外）
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"

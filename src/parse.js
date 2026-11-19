@@ -2,7 +2,7 @@
 // 構文の失敗は最初の1つで止める（AI は1つずつ直すほうが確実なため）。
 import { AkashiError, diag, suggest } from './errors.js';
 
-const KEYWORDS = new Set([
+export const KEYWORDS = new Set([
   'fn', 'do', 'end', 'let', 'if', 'then', 'else', 'when', 'type', 'case', 'match',
   'requires', 'ensures', 'example', 'effects',
   'and', 'or', 'not', 'true', 'false',
