@@ -143,6 +143,17 @@ test('templates must be literals and Html cannot be joined as text', () => {
   assert.ok(codes('fn main(console: Console) -> Unit do print(to: console, value: html(template: "{}", values: ["raw"])) end').includes('E201'));
 });
 
+// html_text の置きかえで守れない場所の穴は E312（OWASP の XSS を防ぐまとめ：引用符の無い属性・script・イベント・URL の属性）
+test('html holes are only allowed where html_text keeps them safe (E312)', () => {
+  const holeCodes = (t) => codes(`fn main(console: Console) -> Unit do print(to: console, value: html(template: ${JSON.stringify(t)}, values: [html_text(value: "javascript:alert(1)")])) end`);
+  for (const bad of ['<a href="{}">x</a>', '<a HREF=" JavaScript:{}">', '<img src={}>', '<p title={}>', '<p {}>', '<script>let a = "{}"</script>', '<p onclick="go({})">', '<p style="{}">', '<iframe srcdoc="{}">', '<!-- {} -->', '<a href="&#106;avascript:{}">']) {
+    assert.ok(holeCodes(bad).includes('E312'), bad);
+  }
+  for (const ok of ['<p>{}</p>', '<p title="{}">', "<p title='{}'>", '<a href="/users/{}">', '<a href="?q={}">', '<a href="#{}">', '<a href="mailto:{}">', '<a href="HTTPS:' + '//example.com/{}">', '<script>1</script><p>{}</p>', '<textarea>{}</textarea>']) {
+    assert.ok(!holeCodes(ok).includes('E312'), ok);
+  }
+});
+
 test('when picks the first true line and needs else', () => {
   assert.equal(out('let n: Int = 42\nprint(to: console, value: when\n n < 10 then "small"\n n < 100 then "medium"\n else "large"\nend)'), 'medium\n');
 });

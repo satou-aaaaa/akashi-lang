@@ -15,6 +15,101 @@ export const SQL = { k: 'Sql' };
 // 型紙の穴の数（html は {}、sql は ?）
 export const HOLE = { html: '{}', sql: '?' };
 export const countHoles = (template, hole) => template.split(hole).length - 1;
+
+// html の型紙で、穴 {} を置いてよい場所か（E312）。html_text は < > & " ' を置きかえるが、それで守れるのは
+// 「タグの間」と「引用符でくくった属性の値」だけ。次の場所は、置きかえても script が動きうるので断る
+// （OWASP Cross Site Scripting Prevention Cheat Sheet）：タグの中・引用符の無い値・<script>/<style> の中・コメント・
+// on…（イベント）・style・srcdoc・srcset、それに URL の属性の始まり（javascript: の URL になりうる）。
+// URL の属性は、型紙に決まった始まり（/ ./ ../ ? # mailto: と、http・https の後に :// ）を書けば、その後ろに置いてよい。
+// compiler/check.ak の html_hole_problem と同じ決まり。変えるときは両方を直す
+export const URL_ATTRS = ['href', 'src', 'action', 'formaction', 'cite', 'poster', 'background', 'data', 'codebase', 'longdesc', 'manifest', 'ping', 'icon', 'lowsrc', 'dynsrc', 'xlink:href'];
+export const CODE_ATTRS = ['style', 'srcdoc', 'srcset'];
+// http・https の始まりは「http:」と「//」をつないで作る（ブラウザで動くファイルに、ほかのサイトの URL を書かない決まりがあるため。通信はしない）
+export const SAFE_URL_STARTS = ['/', './', '../', '?', '#', 'http:' + '//', 'https:' + '//', 'mailto:'];
+const WS = [' ', '\t', '\n', '\r', '\f'];
+const lowerAscii = (c) => (c >= 'A' && c <= 'Z' ? String.fromCharCode(c.charCodeAt(0) + 32) : c);
+// 1文字ぶん進める。m：text・open・bang・tag・attrs・aname・aftername・beforeval・dq・sq・uq・raw
+function htmlStep(st, c) {
+  const { m } = st;
+  const lc = lowerAscii(c);
+  const ws = WS.includes(c);
+  const finish = () => (st.tag === 'script' || st.tag === 'style' ? { ...st, m: 'raw', raw: st.tag, val: '' } : { ...st, m: 'text' });
+  switch (m) {
+    case 'text': return c === '<' ? { ...st, m: 'open' } : st;
+    case 'open':
+      if (c === '!') return { ...st, m: 'bang' };
+      if (c === '/') return { ...st, m: 'tag', tag: '/' };
+      if (/^[A-Za-z]$/.test(c)) return { ...st, m: 'tag', tag: lc };
+      return c === '<' ? st : { ...st, m: 'text' };
+    case 'bang': return c === '>' ? { ...st, m: 'text' } : st;
+    case 'tag':
+      if (ws || c === '/') return { ...st, m: 'attrs' };
+      if (c === '>') return finish();
+      return { ...st, tag: st.tag + lc };
+    case 'attrs':
+      if (ws || c === '/') return st;
+      if (c === '>') return finish();
+      return { ...st, m: 'aname', attr: lc };
+    case 'aname':
+      if (c === '=') return { ...st, m: 'beforeval' };
+      if (ws) return { ...st, m: 'aftername' };
+      if (c === '>') return finish();
+      if (c === '/') return { ...st, m: 'attrs' };
+      return { ...st, attr: st.attr + lc };
+    case 'aftername':
+      if (ws) return st;
+      if (c === '=') return { ...st, m: 'beforeval' };
+      if (c === '>') return finish();
+      if (c === '/') return { ...st, m: 'attrs' };
+      return { ...st, m: 'aname', attr: lc };
+    case 'beforeval':
+      if (ws) return st;
+      if (c === '"') return { ...st, m: 'dq', val: '' };
+      if (c === "'") return { ...st, m: 'sq', val: '' };
+      if (c === '>') return finish();
+      return { ...st, m: 'uq', val: lc };
+    case 'dq': case 'sq':
+      if (c === (m === 'dq' ? '"' : "'")) return { ...st, m: 'attrs' };
+      return ws && st.val === '' ? st : { ...st, val: st.val + lc };
+    case 'uq':
+      if (ws) return { ...st, m: 'attrs' };
+      if (c === '>') return finish();
+      return { ...st, val: st.val + lc };
+    case 'raw': {
+      const val = st.val + lc;
+      return val.endsWith('</' + st.raw) ? { ...st, m: 'tag', tag: '/' + st.raw, val: '' } : { ...st, val };
+    }
+    default: return st;
+  }
+}
+// 穴を置いた場所がだめなら、その理由（よければ ""）
+function holeProblem(st) {
+  switch (st.m) {
+    case 'text': return '';
+    case 'raw': return `inside <${st.raw}>, where a value runs as code`;
+    case 'bang': return 'inside a comment or <!...>';
+    case 'uq': case 'beforeval': return `in the unquoted value of '${st.attr}' (put quotes around it: ${st.attr}="{}")`;
+    case 'dq': case 'sq':
+      if (st.attr.startsWith('on') || CODE_ATTRS.includes(st.attr)) return `in the '${st.attr}' attribute, where html_text cannot keep it safe`;
+      if (URL_ATTRS.includes(st.attr) && !SAFE_URL_STARTS.some((p) => st.val.startsWith(p))) return `at the start of the URL attribute '${st.attr}' (it could become a javascript: URL)`;
+      return '';
+    default: return 'inside a tag';
+  }
+}
+// 型紙のだめな穴の、番号（1から）と理由。無ければ null
+export function htmlHoleProblem(template) {
+  const parts = template.split('{}');
+  let st = { m: 'text', tag: '', attr: '', val: '', raw: '' };
+  for (let i = 0; i < parts.length; i++) {
+    for (const c of parts[i]) st = htmlStep(st, c);
+    if (i < parts.length - 1) {
+      const why = holeProblem(st);
+      if (why) return { n: i + 1, why };
+      st = st.m === 'dq' || st.m === 'sq' || st.m === 'uq' ? { ...st, val: st.val + '{}' } : st;
+    }
+  }
+  return null;
+}
 // 権利（ケーパビリティ）の型。値を作る方法は無く、main が受け取って引数で渡すだけ
 const CAPS = ['Console', 'Folder', 'OutFolder'];
 const isCap = (t) => CAPS.includes(prune(t).k);
@@ -421,6 +516,13 @@ export function check(program) {
       if (t && t.value.k !== 'str') {
         err('E310', `the template of ${e.name} must be written as a literal string`, t.pos,
           `write the fixed part in quotes and put outside values in values: e.g. ${e.name}(template: "${e.name === 'html' ? '<p>{}</p>' : 'SELECT * FROM users WHERE name = ?'}", values: [name]). Never build the template from other strings`);
+      }
+      if (e.name === 'html' && t && t.value.k === 'str') {
+        const bad = htmlHoleProblem(t.value.v);
+        if (bad) {
+          err('E312', `hole ${bad.n} of the html template is ${bad.why}`, t.pos,
+            'put values only between tags or inside a quoted attribute value. For a URL, write its fixed start in the template, e.g. href="/users/{}" (a URL may start with / ./ ../ ? # mailto: or http: or https: followed by //)');
+        }
       }
       const v = e.args.find((a) => a.name === 'values');
       if (t && t.value.k === 'str' && v && v.value.k === 'list') {

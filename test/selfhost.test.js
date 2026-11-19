@@ -349,6 +349,16 @@ end
 fn main(console: Console, folder: Folder, out: OutFolder) -> Unit do f(out: out, folder: folder) end`,
 ];
 
+// html の型紙の穴の置き場所（E312）。src/check.js の htmlHoleProblem と compiler/check.ak の html_hole_problem が同じ答えになるか
+const holeTemplates = ['<p>{}</p>', '<a href="{}">x</a>', '<a href="/u/{}">', "<a HREF='https://x/{}'>", '<a href=" mailto:{}">', '<p title={}>', '<p {}>', '<{}>',
+  '<script>var x={}</script><p>{}</p>', '<SCRIPT>x</Script ><p>{}</p>', '<p onclick="{}">', '<img src="javascript:{}">', '<!-- {} -->', '<a href="/{}{}">', '<a href="{}{}">',
+  '<style>{}</style>', '<p title="a">{}</p>', 'a < b {}', '<iframe srcdoc="{}">', '<a title="{}" href="https://{}">', '<p data-x="{}">', '<object data="{}">',
+  '<a href="HTTPS://x/{}">', '<a href="\\tjavascript:{}">', '<a href="//{}">', '<scriptx>{}</scriptx>', '</script>{}', '<p>{}<!-- c -->{}', '<a href="/{}" onclick="{}">',
+  '<svg><a xlink:href="{}">', '<<p>{}', '<p/>{}', "<p title='{}'>", "<a href='{}'>", '<img srcset="{}">', '<p style="{}">', '<a href = "?q={}">', '<a href=#{}>', '<p title = {}>',
+  '<form action="./{}">', '<a href="../{}">', '<a href="http:/{}">', '<a href="{}" title="x">', '<p title="{}" >{}</p>', '<b>{}</b><i>{}</i>', '{}', '<a href', '<p>{}<'];
+const holeSource = holeTemplates.map((t, i) => `fn h${i}(x: Html) -> Html ensures true example h${i}(x: html_text(value: "a")) == h${i}(x: html_text(value: "a")) do\n  html(template: ${JSON.stringify(t)}, values: [${t.split('{}').slice(1).map(() => 'x').join(', ')}])\nend`).join('\n') + '\nfn main() -> Unit do () end';
+checkExtra.push(holeSource);
+
 // いくつものファイル（use）。main.ak から読む
 const checkFiles = [
   { 'main.ak': 'use "lib/a.ak"\nfn main(console: Console) -> Unit do print(to: console, value: twice(x: 2)) end', 'lib/a.ak': 'use "b.ak"\nfn twice(x: Int) -> Int ensures true example twice(x: 1) == 2 do x + bad end', 'lib/b.ak': 'type Shape case Dot end\nfn main() -> Int do 1 end' },

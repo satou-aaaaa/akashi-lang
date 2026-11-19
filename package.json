@@ -1,6 +1,6 @@
 {
   "name": "akashi-lang",
-  "version": "0.19.1",
+  "version": "0.20.0",
   "description": "Akashi: a small programming language designed to be written by LLMs",
   "type": "module",
   "private": true,
