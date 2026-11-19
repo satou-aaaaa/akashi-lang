@@ -1,7 +1,7 @@
 // まとめの入口（Node の部品を使わない。ブラウザでもこのまま動く）。check（静的検査＋example）と run（main を実行）と build（WebAssembly）。
 // Node から使うときは src/index.js（Folder にフォルダの名前を渡せる）。
 import { AkashiError, diag } from './errors.js';
-import { parse } from './parse.js';
+import { parseProgram } from './modules.js';
 import { check } from './check.js';
 import { Machine } from './run.js';
 import { fuzz } from './fuzz.js';
@@ -18,16 +18,17 @@ function catchAkashi(fn) {
 }
 
 // 構文と型の検査だけ。{ ok, diagnostics, program }
-export function analyze(src) {
-  const p = catchAkashi(() => parse(src));
+// load(パス)：use で読むファイルの中身を返す（無ければ null）。main のファイルのフォルダからの相対パスで呼ばれる
+export function analyze(src, { load } = {}) {
+  const p = catchAkashi(() => parseProgram(src, { load }));
   if (p.error) return { ok: false, diagnostics: [p.error] };
   const diagnostics = check(p.value);
   return { ok: diagnostics.length === 0, diagnostics, program: p.value };
 }
 
 // 検査＋全部の example を回す。{ ok, diagnostics, examples: { passed, total } }
-export function checkSource(src) {
-  const a = analyze(src);
+export function checkSource(src, { load } = {}) {
+  const a = analyze(src, { load });
   if (!a.ok) return { ok: false, diagnostics: a.diagnostics, examples: { passed: 0, total: 0 }, generated: 0 };
   const m = new Machine(a.program, () => {});
   const diagnostics = [];
@@ -49,10 +50,10 @@ export function checkSource(src) {
 
 // 検査（example も）が通ったら main を動かす。{ ok, diagnostics, output }
 // grants.folder：main が Folder を求めたときに渡す鍵（src/folder.js の openFolder で作る）。無ければ渡さない
-export function runSource(src, { out, grants = {} } = {}) {
-  const c = checkSource(src);
+export function runSource(src, { out, grants = {}, load } = {}) {
+  const c = checkSource(src, { load });
   if (!c.ok) return { ok: false, diagnostics: c.diagnostics, output: '' };
-  const a = analyze(src);
+  const a = analyze(src, { load });
   const main = a.program.fns.find((f) => f.name === 'main');
   if (!main) {
     return { ok: false, diagnostics: [diag('E301', 'there is no main function', { line: 1, col: 1 }, 'add: fn main(console: Console) -> Unit do ... end')], output: '' };
@@ -80,10 +81,10 @@ export function runSource(src, { out, grants = {} } = {}) {
 }
 
 // 検査（example・自動の試しも）が通ったら WebAssembly にする。{ ok, diagnostics, bytes }
-export function buildSource(src) {
-  const c = checkSource(src);
+export function buildSource(src, { load } = {}) {
+  const c = checkSource(src, { load });
   if (!c.ok) return { ok: false, diagnostics: c.diagnostics };
-  const a = analyze(src); // 型を節に残した木（compile が使う）
+  const a = analyze(src, { load }); // 型を節に残した木（compile が使う）
   return compile(a.program);
 }
 

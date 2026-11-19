@@ -12,6 +12,9 @@ export const CODES = {
   E107: 'if without else',
   E108: 'extra end',
   E112: 'when without else',
+  E113: 'use path not allowed',
+  E114: 'used file not found',
+  E115: 'main in a used file',
   E200: 'unknown name',
   E201: 'type mismatch',
   E202: 'wrong arguments',
@@ -58,6 +61,7 @@ export function diag(code, message, pos, fix, extra = {}) {
     message,
     line: pos?.line ?? 0,
     col: pos?.col ?? 0,
+    ...(pos?.file ? { file: pos.file } : {}),
     fix,
     ...extra,
   };
@@ -71,6 +75,8 @@ export class AkashiError extends Error {
 }
 
 export function formatDiag(d, file = '<input>') {
+  // use で読んだファイルのエラーは、そのファイルの名前を出す（main のファイルから見た場所）
+  if (d.file) file = file.includes('/') ? `${file.slice(0, file.lastIndexOf('/') + 1)}${d.file}` : d.file;
   return `${file}:${d.line}:${d.col}: ${d.code} ${d.message}\n  fix: ${d.fix}`;
 }
 

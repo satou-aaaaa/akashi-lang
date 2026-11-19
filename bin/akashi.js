@@ -60,7 +60,7 @@ if (cmd === 'wasm') {
 }
 if (cmd === 'build') {
   if (!file) usage();
-  const res = buildSource(readFileSync(file, 'utf8'));
+  const res = buildSource(readFileSync(file, 'utf8'), { file });
   const out = outFile ?? file.replace(/\.ak$/, '') + '.wasm';
   if (res.ok) writeFileSync(out, res.bytes);
   if (json) console.log(JSON.stringify({ ok: res.ok, diagnostics: res.diagnostics, file, output: res.ok ? out : null, bytes: res.ok ? res.bytes.length : 0 }, null, 2));
@@ -72,8 +72,8 @@ if (!['check', 'run'].includes(cmd) || !file) usage();
 
 const src = readFileSync(file, 'utf8');
 const res = cmd === 'check'
-  ? checkSource(src)
-  : runSource(src, { out: json ? undefined : (s) => process.stdout.write(s), grants: { folder, outFolder } });
+  ? checkSource(src, { file })
+  : runSource(src, { out: json ? undefined : (s) => process.stdout.write(s), grants: { folder, outFolder }, file });
 
 if (json) {
   console.log(JSON.stringify({ ...res, file }, null, 2));

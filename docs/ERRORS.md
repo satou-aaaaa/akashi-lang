@@ -19,6 +19,9 @@
 | [E107](#e107) | if without else |
 | [E108](#e108) | extra end |
 | [E112](#e112) | when without else |
+| [E113](#e113) | use path not allowed |
+| [E114](#e114) | used file not found |
+| [E115](#e115) | main in a used file |
 | [E200](#e200) | unknown name |
 | [E201](#e201) | type mismatch |
 | [E202](#e202) | wrong arguments |
@@ -178,6 +181,54 @@ end
 
 - message: 'when' has no 'else'
 - fix: end every when with an else line: else <value>
+
+## E113
+
+use path not allowed.
+
+```
+use "../outside.ak"
+
+fn main(console: Console) -> Unit
+do
+  print(to: console, value: 1)
+end
+```
+
+- message: use path '../outside.ak' is not allowed
+- fix: write a relative path to an .ak file inside the folder of the main file, without .. (e.g. use "lib/text.ak")
+
+## E114
+
+used file not found.
+
+```
+use "lib/missing.ak"
+
+fn main(console: Console) -> Unit
+do
+  print(to: console, value: 1)
+end
+```
+
+- message: used file 'lib/missing.ak' was not found
+- fix: create lib/missing.ak (in the folder of the main file), or fix the path; paths are relative to the file that has the use line
+
+## E115
+
+main in a used file.
+
+```
+use "lib/has_main.ak"
+
+fn main(console: Console) -> Unit
+do
+  print(to: console, value: 1)
+end
+```
+
+- message: the used file 'lib/has_main.ak' has a main function
+- fix: only the file you run has main; move main there or rename this function
 
 ## E200
 
