@@ -76,3 +76,12 @@ test('a program with a syntax error is not formatted, and the error is reported'
   assert.equal(r.ok, false);
   assert.equal(r.error.code, 'E100');
 });
+
+// 2026-11-19：「case ... then」の後ろの行に値を書くと、値の行が case と同じ深さに戻っていた（test/compile/data.ak で見つけた）
+test('a match arm whose value is on the next line is indented one step deeper', () => {
+  const src = 'fn f(x: Option[Int]) -> Int\n  ensures true\n  example f(x: None) == 0\ndo\n  match x\n    case Some(value: v) then\n      v + 1\n    case None then 0\n  end\nend\n';
+  assert.equal(format(src).text, src);
+  assert.equal(format(src.replace('      v + 1', 'v + 1')).text, src);
+  const nested = 'fn g(x: Option[Int]) -> Int\n  ensures true\n  example g(x: None) == 0\ndo\n  match x\n    case Some(value: v) then\n      if v > 0 then\n        v\n      else\n        0\n      end\n    case None then 0\n  end\nend\n';
+  assert.equal(format(nested).text, nested);
+});

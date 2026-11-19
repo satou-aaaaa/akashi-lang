@@ -48,7 +48,7 @@ test('hello and gcd compile (the compiler is not silently skipping everything)',
 });
 
 test('unsupported features give E600 with a position and a fix', () => {
-  const b = buildSource('fn main(console: Console) -> Unit do print(to: console, value: len(list: [1, 2])) end');
+  const b = buildSource('fn main(console: Console) -> Unit do print(to: console, value: html_text(value: "a")) end');
   assert.equal(b.ok, false);
   assert.equal(b.diagnostics[0].code, 'E600');
   assert.ok(b.diagnostics[0].line > 0 && b.diagnostics[0].fix.length > 10);
@@ -102,4 +102,40 @@ test('generated Int and Bool expressions give the same result (300 programs)', (
     if (viaInterpreter(src).code) errors++;
   }
   assert.ok(errors > 10 && errors < 250, `the generated programs should include both errors and results (${errors} errors)`);
+});
+
+// 自動で作ったリストの式（段階2）を、両方で動かして比べる。種は固定
+function genList(r, d) {
+  const pick = (xs) => xs[Math.floor(r() * xs.length)];
+  if (d <= 0 || r() < 0.2) {
+    if (r() < 0.3) return `range(from: ${genInt(r, 1)}, to: ${pick(['0', '3', '10', '-2'])})`;
+    const n = Math.floor(r() * 5);
+    return `[${Array.from({ length: n }, () => genInt(r, 1)).join(', ')}]`;
+  }
+  switch (Math.floor(r() * 8)) {
+    case 0: return `reverse(list: ${genList(r, d - 1)})`;
+    case 1: return `take(list: ${genList(r, d - 1)}, count: ${pick(['0', '1', '3', '9', '-1'])})`;
+    case 2: return `drop(list: ${genList(r, d - 1)}, count: ${pick(['0', '2', '9', '-2'])})`;
+    case 3: return `sort(list: ${genList(r, d - 1)})`;
+    case 4: return `append(list: ${genList(r, d - 1)}, item: ${genInt(r, 1)})`;
+    case 5: return `(${genList(r, d - 1)} ++ ${genList(r, d - 1)})`;
+    case 6: return `map(list: ${genList(r, d - 1)}, func: twice)`;
+    default: return `filter(list: ${genList(r, d - 1)}, func: odd)`;
+  }
+}
+
+test('generated list expressions give the same result (200 programs)', () => {
+  const r = rng(20261120);
+  const head = 'fn twice(x: Int) -> Int\n  ensures true\n  example twice(x: 1) == 2\ndo\n  x * 2\nend\n\nfn odd(x: Int) -> Bool\n  ensures true\n  example odd(x: 3)\ndo\n  x % 2 != 0\nend\n\n';
+  let errors = 0;
+  for (let i = 0; i < 200; i++) {
+    const l = genList(r, 3);
+    const k = r();
+    const e = k < 0.5 ? l : k < 0.6 ? `sum(list: ${l})` : k < 0.7 ? `max(list: ${l})` : k < 0.8 ? `get(list: ${l}, index: ${Math.floor(r() * 4)})` : k < 0.9 ? `at(list: ${l}, index: ${Math.floor(r() * 4) - 1})` : `${l} == ${genList(r, 2)}`;
+    const src = `${head}fn main(console: Console) -> Unit do print(to: console, value: ${e}) end`;
+    if (analyze(src).diagnostics.length) continue;
+    assert.ok(same(src, e), `not compiled: ${e}\n${JSON.stringify(viaWasm(src).unsupported)}`);
+    if (viaInterpreter(src).code) errors++;
+  }
+  assert.ok(errors > 5 && errors < 150, `the generated programs should include both errors and results (${errors} errors)`);
 });

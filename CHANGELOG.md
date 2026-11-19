@@ -3,6 +3,15 @@
 版の決め方：試作のあいだは 0.x。言語の決まりが変わる（前に通ったプログラムが通らなくなる）ときは、2つめの数を上げる。
 形は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) にならう。
 
+## 0.8.0 — 2026-11-19
+
+### 足した
+- コンパイラ（段階2の前半）：List・Option・Result・自分で作る型・match・リストの関数（len・get・at・range・append・map・filter・fold・find・any・all・reverse・take・drop・sort・sum・max・min）・parse_int・trim・`==` で中身まで比べる・`++` でリストをつなぐ、を WebAssembly に書き出す。`examples/` のうち stats・types もコンパイルできるようになった。
+- インタプリタと比べるテストに、自動で作ったリストの式 200 個と、境目の見本（範囲の外・大きすぎる range・あふれ・入れ子の型・文字のくくり・数の読み取り）を足した。
+
+### 直した
+- `akashi fmt`：`case ... then` のあとの行に値を書くと、値の行が case と同じ深さに戻っていた。次の case か end までを1段下げる。テストを足した。
+
 ## 0.7.0 — 2026-11-19
 
 ### 足した
