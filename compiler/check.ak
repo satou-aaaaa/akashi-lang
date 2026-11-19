@@ -1532,6 +1532,246 @@ do
   if hole == "" then 0 else len(list: split(text: text, by: hole)) - 1 end
 end
 
+# html の型紙で、穴 {} を置いてよい場所か（E312）。src/check.js の htmlHoleProblem と同じ決まり。変えるときは両方を直す
+# html_text が守れるのは「タグの間」と「引用符でくくった属性の値」だけ。タグの中・引用符の無い値・<script>/<style> の中・
+# コメント・on…・style・srcdoc・srcset と、URL の属性の始まり（決まった始まりが無いところ）は断る
+# m：text・open・bang・tag・attrs・aname・aftername・beforeval・dq・sq・uq・raw
+type HtmlSt
+  case HtmlSt(m: Str, tag: Str, attr: Str, val: Str, raw: Str)
+end
+
+# 穴を順に見る：st は今の場所・k は見た部分の数・last は部分の数・n はだめな穴の番号・why はその理由
+type HoleScan
+  case HoleScan(st: HtmlSt, k: Int, last: Int, n: Int, why: Str)
+end
+
+fn hh_ws(c: Str) -> Bool
+  ensures true
+  example hh_ws(c: "\t")
+  example not hh_ws(c: "a")
+do
+  c == " " or c == "\t" or c == "\n" or c == char_of(code: 13) or c == char_of(code: 12)
+end
+
+fn hh_alpha(c: Str) -> Bool
+  ensures true
+  example hh_alpha(c: "Q")
+  example not hh_alpha(c: "_")
+do
+  str_len(text: c) == 1 and contains(text: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", part: c)
+end
+
+# A〜Z だけを小文字にする
+fn hh_lower(c: Str) -> Str
+  ensures true
+  example hh_lower(c: "H") == "h"
+  example hh_lower(c: "1") == "1"
+do
+  if str_len(text: c) == 1 and code_of(char: c) >= 65 and code_of(char: c) <= 90 then char_of(code: code_of(char: c) + 32) else c end
+end
+
+# > でタグが終わったとき：script・style なら中身は文字でなくコード
+fn hh_finish(tag: Str, attr: Str, val: Str, raw: Str) -> HtmlSt
+  ensures true
+  example hh_finish(tag: "script", attr: "", val: "", raw: "") == HtmlSt(m: "raw", tag: "script", attr: "", val: "", raw: "script")
+do
+  if tag == "script" or tag == "style" then HtmlSt(m: "raw", tag: tag, attr: attr, val: "", raw: tag) else HtmlSt(m: "text", tag: tag, attr: attr, val: val, raw: raw) end
+end
+
+fn hh_step(st: HtmlSt, c: Str) -> HtmlSt
+  ensures true
+  example hh_step(st: HtmlSt(m: "text", tag: "", attr: "", val: "", raw: ""), c: "<") == HtmlSt(m: "open", tag: "", attr: "", val: "", raw: "")
+do
+  match st
+    case HtmlSt(m: m, tag: t, attr: a, val: v, raw: r) then hh_next(m: m, tag: t, attr: a, val: v, raw: r, c: c)
+  end
+end
+
+fn hh_next(m: Str, tag: Str, attr: Str, val: Str, raw: Str, c: Str) -> HtmlSt
+  ensures true
+  example hh_next(m: "tag", tag: "p", attr: "", val: "", raw: "", c: ">") == HtmlSt(m: "text", tag: "p", attr: "", val: "", raw: "")
+do
+  let same: HtmlSt = HtmlSt(m: m, tag: tag, attr: attr, val: val, raw: raw)
+  when
+    m == "text" then if c == "<" then HtmlSt(m: "open", tag: tag, attr: attr, val: val, raw: raw) else same end
+    m == "open" then hh_open(st: same, c: c)
+    m == "bang" then if c == ">" then HtmlSt(m: "text", tag: tag, attr: attr, val: val, raw: raw) else same end
+    m == "tag" then hh_tag(st: same, c: c)
+    m == "attrs" or m == "aname" or m == "aftername" then hh_attr(st: same, c: c)
+    m == "beforeval" then hh_before(st: same, c: c)
+    m == "dq" or m == "sq" or m == "uq" then hh_value(st: same, c: c)
+    m == "raw" then if ends_with(text: val ++ hh_lower(c: c), suffix: "</" ++ raw) then HtmlSt(m: "tag", tag: "/" ++ raw, attr: attr, val: "", raw: raw) else HtmlSt(m: m, tag: tag, attr: attr, val: val ++ hh_lower(c: c), raw: raw) end
+    else same
+  end
+end
+
+# < の直後
+fn hh_open(st: HtmlSt, c: Str) -> HtmlSt
+  ensures true
+  example hh_open(st: HtmlSt(m: "open", tag: "", attr: "", val: "", raw: ""), c: "A") == HtmlSt(m: "tag", tag: "a", attr: "", val: "", raw: "")
+do
+  match st
+    case HtmlSt(m: m, tag: t, attr: a, val: v, raw: r) then
+      when
+        c == "!" then HtmlSt(m: "bang", tag: t, attr: a, val: v, raw: r)
+        c == "/" then HtmlSt(m: "tag", tag: "/", attr: a, val: v, raw: r)
+        hh_alpha(c: c) then HtmlSt(m: "tag", tag: hh_lower(c: c), attr: a, val: v, raw: r)
+        c == "<" then st
+        else HtmlSt(m: "text", tag: t, attr: a, val: v, raw: r)
+      end
+  end
+end
+
+# タグの名前を読んでいるところ
+fn hh_tag(st: HtmlSt, c: Str) -> HtmlSt
+  ensures true
+  example hh_tag(st: HtmlSt(m: "tag", tag: "a", attr: "", val: "", raw: ""), c: " ") == HtmlSt(m: "attrs", tag: "a", attr: "", val: "", raw: "")
+do
+  match st
+    case HtmlSt(m: _, tag: t, attr: a, val: v, raw: r) then
+      when
+        hh_ws(c: c) or c == "/" then HtmlSt(m: "attrs", tag: t, attr: a, val: v, raw: r)
+        c == ">" then hh_finish(tag: t, attr: a, val: v, raw: r)
+        else HtmlSt(m: "tag", tag: t ++ hh_lower(c: c), attr: a, val: v, raw: r)
+      end
+  end
+end
+
+# 属性のあいだ（attrs）・属性の名前（aname）・名前の後（aftername）
+fn hh_attr(st: HtmlSt, c: Str) -> HtmlSt
+  ensures true
+  example hh_attr(st: HtmlSt(m: "aname", tag: "a", attr: "hre", val: "", raw: ""), c: "F") == HtmlSt(m: "aname", tag: "a", attr: "href", val: "", raw: "")
+do
+  match st
+    case HtmlSt(m: m, tag: t, attr: a, val: v, raw: r) then
+      when
+        c == ">" then hh_finish(tag: t, attr: a, val: v, raw: r)
+        m == "attrs" then if hh_ws(c: c) or c == "/" then st else HtmlSt(m: "aname", tag: t, attr: hh_lower(c: c), val: v, raw: r) end
+        c == "=" then HtmlSt(m: "beforeval", tag: t, attr: a, val: v, raw: r)
+        c == "/" then HtmlSt(m: "attrs", tag: t, attr: a, val: v, raw: r)
+        hh_ws(c: c) then HtmlSt(m: "aftername", tag: t, attr: a, val: v, raw: r)
+        m == "aname" then HtmlSt(m: "aname", tag: t, attr: a ++ hh_lower(c: c), val: v, raw: r)
+        else HtmlSt(m: "aname", tag: t, attr: hh_lower(c: c), val: v, raw: r)
+      end
+  end
+end
+
+# = の後、値の前
+fn hh_before(st: HtmlSt, c: Str) -> HtmlSt
+  ensures true
+  example hh_before(st: HtmlSt(m: "beforeval", tag: "a", attr: "href", val: "x", raw: ""), c: "\"") == HtmlSt(m: "dq", tag: "a", attr: "href", val: "", raw: "")
+do
+  match st
+    case HtmlSt(m: _, tag: t, attr: a, val: v, raw: r) then
+      when
+        hh_ws(c: c) then st
+        c == "\"" then HtmlSt(m: "dq", tag: t, attr: a, val: "", raw: r)
+        c == "'" then HtmlSt(m: "sq", tag: t, attr: a, val: "", raw: r)
+        c == ">" then hh_finish(tag: t, attr: a, val: v, raw: r)
+        else HtmlSt(m: "uq", tag: t, attr: a, val: hh_lower(c: c), raw: r)
+      end
+  end
+end
+
+# 属性の値（dq・sq は引用符の中、uq は引用符なし）。値の頭の空白は数えない
+fn hh_value(st: HtmlSt, c: Str) -> HtmlSt
+  ensures true
+  example hh_value(st: HtmlSt(m: "dq", tag: "a", attr: "href", val: "", raw: ""), c: " ") == HtmlSt(m: "dq", tag: "a", attr: "href", val: "", raw: "")
+do
+  match st
+    case HtmlSt(m: m, tag: t, attr: a, val: v, raw: r) then
+      when
+        m == "dq" and c == "\"" then HtmlSt(m: "attrs", tag: t, attr: a, val: v, raw: r)
+        m == "sq" and c == "'" then HtmlSt(m: "attrs", tag: t, attr: a, val: v, raw: r)
+        m == "uq" and hh_ws(c: c) then HtmlSt(m: "attrs", tag: t, attr: a, val: v, raw: r)
+        m == "uq" and c == ">" then hh_finish(tag: t, attr: a, val: v, raw: r)
+        m != "uq" and hh_ws(c: c) and v == "" then st
+        else HtmlSt(m: m, tag: t, attr: a, val: v ++ hh_lower(c: c), raw: r)
+      end
+  end
+end
+
+# URL の決まった始まり（javascript: などにならない）
+fn hh_safe_url(v: Str) -> Bool
+  ensures true
+  example hh_safe_url(v: "/users/")
+  example not hh_safe_url(v: "javascript:")
+do
+  any(list: [starts_with(text: v, prefix: "/"), starts_with(text: v, prefix: "./"), starts_with(text: v, prefix: "../"), starts_with(text: v, prefix: "?"), starts_with(text: v, prefix: "#"), starts_with(text: v, prefix: "http:" ++ "//"), starts_with(text: v, prefix: "https:" ++ "//"), starts_with(text: v, prefix: "mailto:")], func: hh_yes)
+end
+
+fn hh_yes(b: Bool) -> Bool
+  ensures result == b
+  example hh_yes(b: true)
+do
+  b
+end
+
+# 穴を置いた場所がだめなら、その理由（よければ ""）
+fn hh_problem(st: HtmlSt) -> Str
+  ensures true
+  example hh_problem(st: HtmlSt(m: "text", tag: "", attr: "", val: "", raw: "")) == ""
+  example hh_problem(st: HtmlSt(m: "dq", tag: "a", attr: "href", val: "", raw: "")) == "at the start of the URL attribute 'href' (it could become a javascript: URL)"
+do
+  match st
+    case HtmlSt(m: m, tag: _, attr: a, val: v, raw: r) then
+      when
+        m == "text" then ""
+        m == "raw" then "inside <" ++ r ++ ">, where a value runs as code"
+        m == "bang" then "inside a comment or <!...>"
+        m == "uq" or m == "beforeval" then "in the unquoted value of '" ++ a ++ "' (put quotes around it: " ++ a ++ "=\"{}\")"
+        m == "dq" or m == "sq" then hh_attr_problem(attr: a, val: v)
+        else "inside a tag"
+      end
+  end
+end
+
+fn hh_attr_problem(attr: Str, val: Str) -> Str
+  ensures true
+  example hh_attr_problem(attr: "title", val: "") == ""
+  example hh_attr_problem(attr: "onclick", val: "") == "in the 'onclick' attribute, where html_text cannot keep it safe"
+do
+  when
+    starts_with(text: attr, prefix: "on") or in_table(table: " style srcdoc srcset ", word: attr) then "in the '" ++ attr ++ "' attribute, where html_text cannot keep it safe"
+    in_table(table: " href src action formaction cite poster background data codebase longdesc manifest ping icon lowsrc dynsrc xlink:href ", word: attr) and not hh_safe_url(v: val) then "at the start of the URL attribute '" ++ attr ++ "' (it could become a javascript: URL)"
+    else ""
+  end
+end
+
+# 型紙の1つの部分を読み、その後ろに穴があれば（最後の部分でなければ）場所を確かめる
+fn hh_part(h: HoleScan, part: Str) -> HoleScan
+  ensures true
+  example hh_part(h: HoleScan(st: HtmlSt(m: "text", tag: "", attr: "", val: "", raw: ""), k: 0, last: 1, n: 0, why: ""), part: "<p>") == HoleScan(st: HtmlSt(m: "text", tag: "p", attr: "", val: "", raw: ""), k: 1, last: 1, n: 0, why: "")
+do
+  match h
+    case HoleScan(st: st, k: k, last: last, n: n, why: why) then if why != "" then h else hh_after(st: fold(list: chars(text: part), init: st, func: hh_step), k: k, last: last) end
+  end
+end
+
+fn hh_after(st: HtmlSt, k: Int, last: Int) -> HoleScan
+  ensures true
+  example hh_after(st: HtmlSt(m: "uq", tag: "a", attr: "title", val: "", raw: ""), k: 0, last: 2) == HoleScan(st: HtmlSt(m: "uq", tag: "a", attr: "title", val: "", raw: ""), k: 1, last: 2, n: 1, why: "in the unquoted value of 'title' (put quotes around it: title=\"{}\")")
+do
+  if k + 1 >= last then HoleScan(st: st, k: k + 1, last: last, n: 0, why: "") else
+    match st
+      case HtmlSt(m: m, tag: t, attr: a, val: v, raw: r) then if hh_problem(st: st) != "" then HoleScan(st: st, k: k + 1, last: last, n: k + 1, why: hh_problem(st: st)) else HoleScan(st: HtmlSt(m: m, tag: t, attr: a, val: if m == "dq" or m == "sq" or m == "uq" then v ++ "{}" else v end, raw: r), k: k + 1, last: last, n: 0, why: "") end
+    end
+  end
+end
+
+# だめな穴があれば「番号 理由」の E312 の文、無ければ ""
+fn html_hole_problem(template: Str) -> Str
+  ensures true
+  example html_hole_problem(template: "<p>{}</p>") == ""
+  example html_hole_problem(template: "<a href=\"{}\">") == "hole 1 of the html template is at the start of the URL attribute 'href' (it could become a javascript: URL)"
+  example html_hole_problem(template: "<a href=\"/u/{}\">") == ""
+do
+  let parts: List[Str] = split(text: template, by: "{}")
+  match fold(list: parts, init: HoleScan(st: HtmlSt(m: "text", tag: "", attr: "", val: "", raw: ""), k: 0, last: len(list: parts), n: 0, why: ""), func: hh_part)
+    case HoleScan(st: _, k: _, last: _, n: n, why: why) then if why == "" then "" else "hole " ++ to_str(value: n) ++ " of the html template is " ++ why end
+  end
+end
+
 # html・sql の型紙は書いたままの文字で（E310）、穴と値の数が同じ（E311）
 fn template_check(st: St, e: Node) -> St
   ensures true
@@ -1541,7 +1781,8 @@ do
   let hole: Str = if name == "html" then "{}" else "?" end
   let t: Node = find_arg(args: n_kids(n: e), name: "template")
   let v: Node = find_arg(args: n_kids(n: e), name: "values")
-  let st1: St = if n_kind(n: t) != "none" and n_kind(n: first_kid(n: t)) != "str" then report(st: st, code: "E310", n: t, message: "the template of " ++ name ++ " must be written as a literal string") else st end
+  let st0: St = if n_kind(n: t) != "none" and n_kind(n: first_kid(n: t)) != "str" then report(st: st, code: "E310", n: t, message: "the template of " ++ name ++ " must be written as a literal string") else st end
+  let st1: St = if name == "html" and n_kind(n: t) != "none" and n_kind(n: first_kid(n: t)) == "str" and html_hole_problem(template: n_text(n: first_kid(n: t))) != "" then report(st: st0, code: "E312", n: t, message: html_hole_problem(template: n_text(n: first_kid(n: t)))) else st0 end
   if n_kind(n: t) != "none" and n_kind(n: first_kid(n: t)) == "str" and n_kind(n: v) != "none" and n_kind(n: first_kid(n: v)) == "list" and count_holes(text: n_text(n: first_kid(n: t)), hole: hole) != len(list: n_kids(n: first_kid(n: v))) then report(st: st1, code: "E311", n: v, message: "the template has " ++ to_str(value: count_holes(text: n_text(n: first_kid(n: t)), hole: hole)) ++ " hole(s) '" ++ hole ++ "' but " ++ to_str(value: len(list: n_kids(n: first_kid(n: v)))) ++ " value(s) are given") else st1 end
 end
 

@@ -66,7 +66,8 @@ sql(template: "SELECT id FROM users WHERE name = ?", values: [name])  # -> Sql
 - `Sql` keeps the values separate from the query text (parameters), so they are never read as SQL.
 - `Html` and `Sql` cannot be joined with `++`. `to_str` / `print` show them.
 - There is no `eval` and no way to run code from a string.
-- Not covered yet: putting a URL into `href`/`src` (a `javascript:` URL is still possible). Do not put outside values into URL attributes.
+- A `{}` may only be between tags or inside a quoted attribute value (E312). Not inside a tag, an unquoted value, `<script>`/`<style>`, a comment, `on…`, `style`, `srcdoc` or `srcset`.
+- In a URL attribute (`href`, `src`, `action`, ...) the template must fix how the URL starts before the hole: `href="/users/{}"`, `href="?q={}"`, `href="mailto:{}"`. `href="{}"` is E312 (it could become `javascript:`).
 
 ## Types
 

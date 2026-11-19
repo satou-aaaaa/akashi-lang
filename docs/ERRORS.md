@@ -40,6 +40,7 @@
 | [E309](#e309) | capability stored, returned or compared |
 | [E310](#e310) | template is not a literal |
 | [E311](#e311) | template holes and values do not match |
+| [E312](#e312) | html template hole in an unsafe place |
 | [E401](#e401) | missing ensures |
 | [E402](#e402) | missing example |
 | [E600](#e600) | not supported by the compiler yet (akashi build) |
@@ -473,6 +474,19 @@ end
 
 - message: the template has 2 hole(s) '{}' but 1 value(s) are given
 - fix: give exactly one value per '{}' in the same order
+
+## E312
+
+html template hole in an unsafe place.
+
+```
+fn link(url: Str) -> Html ensures true example link(url: "a") == link(url: "a") do
+  html(template: "<a href=\"{}\">open</a>", values: [html_text(value: url)])
+end
+```
+
+- message: hole 1 of the html template is at the start of the URL attribute 'href' (it could become a javascript: URL)
+- fix: put values only between tags or inside a quoted attribute value. For a URL, write its fixed start in the template, e.g. href="/users/{}" (a URL may start with / ./ ../ ? # mailto: or http: or https: followed by //)
 
 ## E401
 

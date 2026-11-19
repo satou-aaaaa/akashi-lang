@@ -33,6 +33,7 @@ export const CODES = {
   E309: 'capability stored, returned or compared',
   E310: 'template is not a literal',
   E311: 'template holes and values do not match',
+  E312: 'html template hole in an unsafe place',
   E401: 'missing ensures',
   E402: 'missing example',
   E600: 'not supported by the compiler yet (akashi build)',
