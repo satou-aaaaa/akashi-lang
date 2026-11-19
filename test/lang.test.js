@@ -126,3 +126,18 @@ test('the complete example in docs/SPEC.md runs', async () => {
   assert.equal(r.ok, true, JSON.stringify(r.diagnostics));
   assert.equal(r.output, 'total = 12\n');
 });
+
+test('outside text cannot change the shape of HTML or SQL', () => {
+  const r = runSource(`fn main(console: Console) -> Unit do
+  print(to: console, value: html(template: "<p title=\\"{}\\">{}</p>", values: [html_text(value: "\\" onclick=\\"x"), html_text(value: "<img src=x onerror=alert(1)>")]))
+  print(to: console, value: sql(template: "DELETE FROM t WHERE id = ?", values: ["1 OR 1=1"]))
+end`);
+  assert.equal(r.ok, true, JSON.stringify(r.diagnostics));
+  assert.equal(r.output, '<p title="&quot; onclick=&quot;x">&lt;img src=x onerror=alert(1)&gt;</p>\nDELETE FROM t WHERE id = ? -- params: ["1 OR 1=1"]\n');
+});
+
+test('templates must be literals and Html cannot be joined as text', () => {
+  assert.ok(codes('fn main(console: Console) -> Unit do\n let t: Str = "<p>{}</p>"\n print(to: console, value: html(template: t, values: [html_text(value: "a")]))\nend').includes('E310'));
+  assert.ok(codes('fn main(console: Console) -> Unit do print(to: console, value: html_text(value: "a") ++ html_text(value: "b")) end').includes('E201'));
+  assert.ok(codes('fn main(console: Console) -> Unit do print(to: console, value: html(template: "{}", values: ["raw"])) end').includes('E201'));
+});

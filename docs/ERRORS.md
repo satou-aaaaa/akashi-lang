@@ -29,6 +29,8 @@ Every diagnostic has `code`, `message`, `line`, `col` and `fix` (what to write i
 | [E304](#e304) | function with capabilities passed as value |
 | [E305](#e305) | effects clause (replaced by capabilities) |
 | [E309](#e309) | capability stored, returned or compared |
+| [E310](#e310) | template is not a literal |
+| [E311](#e311) | template holes and values do not match |
 | [E401](#e401) | missing ensures |
 | [E402](#e402) | missing example |
 | [R500](#r500) | requires failed |
@@ -41,6 +43,7 @@ Every diagnostic has `code`, `message`, `line`, `col` and `fix` (what to write i
 | [R507](#r507) | path escapes the folder |
 | [R508](#r508) | file not readable |
 | [R509](#r509) | capability not granted |
+| [R510](#r510) | template holes and values do not match |
 
 ## E100
 
@@ -100,7 +103,7 @@ fn f(x: Integer) -> Int ensures true example f(x: 1) == 1 do x end
 ```
 
 - message: unknown type 'Integer'
-- fix: types are Int, Bool, Str, Unit, List, Console, Folder; lists are written List[Int]
+- fix: types are Int, Bool, Str, Unit, List, Html, Sql, Console, Folder; lists are written List[Int]
 
 ## E105
 
@@ -296,6 +299,35 @@ end
 - message: let c holds a capability (Console)
 - fix: capabilities cannot be stored; pass the parameter itself, e.g. print(to: console, ...)
 
+## E310
+
+template is not a literal.
+
+```
+fn find(name: Str) -> Sql
+  ensures true
+  example find(name: "a") == find(name: "a")
+do
+  sql(template: "SELECT * FROM users WHERE name = '" ++ name ++ "'", values: [])
+end
+```
+
+- message: the template of sql must be written as a literal string
+- fix: write the fixed part in quotes and put outside values in values: e.g. sql(template: "SELECT * FROM users WHERE name = ?", values: [name]). Never build the template from other strings
+
+## E311
+
+template holes and values do not match.
+
+```
+fn greet(name: Str) -> Html ensures true example greet(name: "a") == greet(name: "a") do
+  html(template: "<p>{} and {}</p>", values: [html_text(value: name)])
+end
+```
+
+- message: the template has 2 hole(s) '{}' but 1 value(s) are given
+- fix: give exactly one value per '{}' in the same order
+
 ## E401
 
 missing ensures.
@@ -431,3 +463,17 @@ end
 
 - message: main asks for a Folder ('folder') but none was granted
 - fix: run with --allow-read <folder> to let this program read files in that folder (and nowhere else)
+
+## R510
+
+template holes and values do not match.
+
+```
+fn main(console: Console) -> Unit do
+  let names: List[Html] = [html_text(value: "a"), html_text(value: "b")]
+  print(to: console, value: html(template: "<p>{}</p>", values: names))
+end
+```
+
+- message: the template has 1 hole(s) '{}' but 2 value(s) were given
+- fix: give exactly one value per '{}'

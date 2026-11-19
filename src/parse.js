@@ -10,7 +10,9 @@ const KEYWORDS = new Set([
 const TWO_CHAR_OPS = ['->', '==', '!=', '<=', '>=', '++'];
 const ONE_CHAR_OPS = '+-*/%<>=()[],:';
 export const CAPABILITY_TYPES = ['Console', 'Folder'];
-export const TYPE_NAMES = ['Int', 'Bool', 'Str', 'Unit', 'List', ...CAPABILITY_TYPES];
+// Html・Sql は「組み立て済みで安全」な値。決まった型紙（文字の書きこみ）に値を差し込む html()・sql() でしか作れない
+export const SAFE_TYPES = ['Html', 'Sql'];
+export const TYPE_NAMES = ['Int', 'Bool', 'Str', 'Unit', 'List', ...SAFE_TYPES, ...CAPABILITY_TYPES];
 
 export function lex(src) {
   const toks = [];
