@@ -31,3 +31,9 @@ test('explain names the error', () => {
   assert.equal(r.status, 0);
   assert.match(r.stdout, /arguments out of order/);
 });
+
+test('spec prints the short spec for prompts', () => {
+  const r = cli('spec');
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /^# Akashi language spec/);
+});

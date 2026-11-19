@@ -1,4 +1,4 @@
-# Akashi language spec (v0.4)
+# Akashi language spec (v0.5)
 
 Paste this whole file into an LLM prompt to teach it Akashi. It is short on purpose.
 
@@ -10,10 +10,11 @@ Paste this whole file into an LLM prompt to teach it Akashi. It is short on purp
 4. **Promises are code.** Pure functions must state `ensures` (a promise about `result`) and at least one `example`. Examples run on every `check`. Then `check` also calls every pure function with many generated inputs that satisfy `requires`; a broken `ensures` (R511) or a crash (R512) is reported with the smallest such input.
 5. **No ambient authority.** A function can touch the outside world (screen, files) only through a capability it was given as a parameter. Only `main` receives capabilities, from the runtime; nobody can create one.
 6. **Outside text never changes the shape of HTML or SQL.** `Html` and `Sql` are built only from a literal template plus values (see below).
+7. **No null, no exceptions to forget.** A value that may be missing is `Option[T]`; an operation that may fail returns `Result[T]`. You get the value out only with `match`, which must handle every case.
 
 ## Program
 
-A program is a list of functions. `run` calls `main`.
+A program is a list of functions and types (`type`, see below), in any order. `run` calls `main`.
 
 ```
 fn name(param: Type, other: Type) -> ReturnType
@@ -35,7 +36,7 @@ end
 | type | lets you | given by |
 | --- | --- | --- |
 | `Console` | `print(to: console, value: x)` | always |
-| `Folder` | `read_text(from: folder, path: "a.txt")`, read-only, only files inside that folder (no `..`, no absolute paths, no links out) | only when run with `--allow-read <folder>` |
+| `Folder` | `read_text(from: folder, path: "a.txt")` → `Result[Str]`, read-only, only files inside that folder (no `..`, no absolute paths, no links out) | only when run with `--allow-read <folder>` |
 
 - Pass a capability down as an argument: `report(console: console, total: t)`.
 - A capability can only be a parameter: it cannot be stored in `let`, returned, put in a list, or compared (E309).
@@ -58,8 +59,46 @@ sql(template: "SELECT id FROM users WHERE name = ?", values: [name])  # -> Sql
 
 ## Types
 
-`Int` (whole numbers only, overflow is an error), `Bool`, `Str`, `Unit` (written `()`), `List[T]`, `Html`, `Sql`, and the capabilities `Console`, `Folder`.
-There are no decimals, no null and no user-defined types yet.
+`Int` (whole numbers only, overflow is an error), `Bool`, `Str`, `Unit` (written `()`), `List[T]`, `Option[T]`, `Result[T]`, `Html`, `Sql`, the capabilities `Console`, `Folder`, and your own types.
+There are no decimals and no null.
+
+## Your own types and match
+
+```
+type Shape
+  case Circle(radius: Int)
+  case Rect(width: Int, height: Int)
+  case Dot
+end
+```
+
+- Type and case names start with a capital letter. A record is a type with one case. Types may refer to themselves (trees).
+- Build a value like a call, with named fields in order: `Rect(width: 2, height: 3)`. A case without fields is just its name: `Dot`.
+- Case names are unique in the whole program. Fields cannot hold capabilities (E309).
+- `==` compares values field by field. `print` shows `Rect(width: 2, height: 3)`.
+
+Read a value only with `match`:
+
+```
+match shape
+  case Circle(radius: r) then 3 * r * r
+  case Rect(width: w, height: h) then w * h
+  case Dot then 0
+end
+```
+
+- Every case of the type appears exactly once (missing: E210). There is no `else` and no `_` case (E211), so adding a case later shows every `match` that must handle it.
+- A pattern lists all fields of the case in declared order (E212). Give each field a new name, or `_` to ignore it.
+- Each line is `case Pattern then value`; all lines give the same type.
+
+Built-in types (no need to declare):
+
+| type | cases | use |
+| --- | --- | --- |
+| `Option[T]` | `Some(value: T)`, `None` | a value that may be missing (instead of null) |
+| `Result[T]` | `Ok(value: T)`, `Err(message: Str)` | an operation that may fail (instead of exceptions) |
+
+An `Option` or `Result` is not its value: `parse_int(text: s) + 1` is E201. Use `match`.
 
 ## Names
 
@@ -88,6 +127,7 @@ area(h: 4, w: 3)        # E207
 | compare | `== !=` (any type, same on both sides), `< <= > >=` (Int) |
 | logic | `and`, `or`, `not`. Mixing `and` with `or` needs parentheses. Comparisons cannot be chained: write `0 <= x and x < 10` |
 | if | `if c then a else b end`; `else` is required; every `if` has its own `end` |
+| match | `match x` / `case Pattern then value` lines / `end` (see above) |
 | when | several cases with one `end` (prefer this over nested if): `when` / `cond then value` lines / `else value` / `end`. The first true line wins |
 
 Example of `when`:
@@ -105,7 +145,8 @@ end
 | call | type |
 | --- | --- |
 | `print(to: console, value: x)` | any → Unit (needs a Console) |
-| `read_text(from: folder, path: p)` | Str (needs a Folder) |
+| `read_text(from: folder, path: p)` | Result[Str] (needs a Folder); a missing file is `Err` |
+| `parse_int(text: s)` | Option[Int]; `None` unless s is a whole number (spaces around are ok) |
 | `lines(text: s)` | List[Str], split at line ends |
 | `html(template: "...", values: [...])` | Html (values: List[Html]) |
 | `html_text(value: s)` | Html, escaped |
@@ -115,7 +156,9 @@ end
 | `str_len(text: s)` | Str → Int |
 | `to_str(value: x)` | any → Str |
 | `range(from: a, to: b)` | List[Int] from a up to b-1 |
-| `get(list: xs, index: i)` | T; index out of range is an error |
+| `at(list: xs, index: i)` | Option[T]; `None` when i is out of range (prefer this) |
+| `get(list: xs, index: i)` | T; out of range is an error, so only use it after checking `i < len(list: xs)` |
+| `find(list: xs, func: f)` | Option[T], the first item where f gives true |
 | `append(list: xs, item: x)` | List[T] |
 | `map(list: xs, func: f)` | f: fn(T) -> U, gives List[U] |
 | `filter(list: xs, func: f)` | f: fn(T) -> Bool |
@@ -152,6 +195,7 @@ end
 ## Commands
 
 ```
-node bin/akashi.js check file.ak [--json]   # types, names, effects, contracts, and all examples
+node bin/akashi.js check file.ak [--json]   # types, names, capabilities, contracts, generated inputs, and all examples
 node bin/akashi.js run file.ak [--json] [--allow-read <folder>]   # check, then run main (requires/ensures are checked on every call)
+node bin/akashi.js spec                     # print this spec (to paste into a prompt)
 ```

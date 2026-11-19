@@ -1,0 +1,23 @@
+# Akashi
+
+> Akashi is a small, strictly checked programming language designed to be written by LLMs. It has no null and no exceptions (Option, Result and exhaustive match instead), no ambient authority (capabilities such as Console and Folder are passed as parameters), injection-safe Html and Sql values, and mandatory contracts (requires / ensures / example) that are checked on every run and tested with generated inputs. Every error has a stable code, a position and a `fix` text; `--json` prints them as data. The interpreter runs on Node.js 22 with no dependencies.
+
+To write Akashi, read docs/SPEC.md first: it is the whole language in one short page. Then run `node bin/akashi.js check <file> --json` and follow each `fix`.
+
+## Docs
+
+- [Spec (paste into a prompt)](docs/SPEC.md): the complete language, short, in English
+- [Error codes](docs/ERRORS.md): every code with a failing sample, its message and its fix
+- [Language reference (Japanese)](docs/reference.md): the same rules in more detail
+- [Security model (Japanese)](docs/security.md): capabilities, injection safety, Option / Result
+
+## Examples
+
+- [examples/](examples/): programs that pass, each with its expected output (`.out`)
+- [examples/bad/](examples/bad/): one failing program per error code (first line `# expect: CODE`)
+
+## Optional
+
+- [Design rationale (Japanese)](docs/DESIGN.md): problems of today's languages, what Akashi adopted and why, research on LLM-friendly languages, sources
+- [Tutorial (Japanese)](docs/tutorial.md)
+- [How-to guides (Japanese)](docs/howto.md)
