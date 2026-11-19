@@ -6,10 +6,12 @@ fn label(n: Int) -> Str
   example label(n: 30) == "FizzBuzz"
   example label(n: 7) == "7"
 do
-  if n % 15 == 0 then "FizzBuzz"
-  else if n % 3 == 0 then "Fizz"
-  else if n % 5 == 0 then "Buzz"
-  else to_str(value: n) end end end
+  when
+    n % 15 == 0 then "FizzBuzz"
+    n % 3 == 0 then "Fizz"
+    n % 5 == 0 then "Buzz"
+    else to_str(value: n)
+  end
 end
 
 fn main(console: Console) -> Unit

@@ -141,3 +141,29 @@ test('templates must be literals and Html cannot be joined as text', () => {
   assert.ok(codes('fn main(console: Console) -> Unit do print(to: console, value: html_text(value: "a") ++ html_text(value: "b")) end').includes('E201'));
   assert.ok(codes('fn main(console: Console) -> Unit do print(to: console, value: html(template: "{}", values: ["raw"])) end').includes('E201'));
 });
+
+test('when picks the first true line and needs else', () => {
+  assert.equal(out('let n: Int = 42\nprint(to: console, value: when\n n < 10 then "small"\n n < 100 then "medium"\n else "large"\nend)'), 'medium\n');
+});
+
+test('generated inputs find a broken ensures and show the smallest one', () => {
+  const c = checkSource('fn abs(x: Int) -> Int ensures result >= 0 example abs(x: 3) == 3 do x end');
+  assert.equal(c.diagnostics[0].code, 'R511');
+  assert.equal(c.diagnostics[0].input, 'abs(x: -1)');
+});
+
+test('generated inputs respect requires', () => {
+  const c = checkSource('fn per(total: Int, count: Int) -> Int requires count > 0 ensures true example per(total: 4, count: 2) == 2 do total / count end');
+  assert.equal(c.ok, true, JSON.stringify(c.diagnostics));
+  assert.ok(c.generated > 50);
+});
+
+test('generated inputs give the same result every time (fixed seed)', () => {
+  const src = 'fn f(xs: List[Int], s: Str) -> Int ensures result >= 0 example f(xs: [1], s: "a") == 2 do len(list: xs) + str_len(text: s) end';
+  assert.deepEqual(checkSource(src), checkSource(src));
+});
+
+test('long-running generated inputs are skipped, not reported', () => {
+  const c = checkSource('fn spin(n: Int) -> Int requires n >= 0 ensures true example spin(n: 1) == 0 do if n == 0 then 0 else spin(n: n - 1) end end');
+  assert.equal(c.ok, true, JSON.stringify(c.diagnostics));
+});
