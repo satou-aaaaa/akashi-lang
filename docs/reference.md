@@ -174,6 +174,9 @@ end
 | `parse_int(text: s)` | Option[Int]。前後の空白は無視。整数でなければ None |
 | `len(list: xs)` | Int |
 | `str_len(text: s)` | Int。文字（コードポイント）の数 |
+| `slice(text: s, from: a, to: b)` | Str。a 文字目から b 文字目の手前まで（文字はコードポイントで数える）。`0 <= a <= b <= str_len` でないと R506 |
+| `code_of(char: c)` | Int。1文字の文字コード（コードポイント）。1文字でないと R506 |
+| `char_of(code: n)` | Str。文字コードから1文字。0〜1114111 でない・サロゲート（55296〜57343）だと R506 |
 | `to_str(value: x)` | Str |
 | `range(from: a, to: b)` | List[Int]。a から b-1 まで（100万個まで） |
 | `at(list: xs, index: i)` | Option[T]。範囲の外なら None |

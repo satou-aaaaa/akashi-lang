@@ -244,3 +244,12 @@ test('standard tools stop instead of guessing: negative counts, empty separators
 test('standard tool names are reserved like every other name', () => {
   assert.ok(codes('fn sum(xs: List[Int]) -> Int\n  ensures true\n  example sum(xs: []) == 0\ndo 0 end\nfn main(console: Console) -> Unit do print(to: console, value: 1) end').includes('E203'));
 });
+
+// v0.11：文字（コードポイント）単位の道具（字句解析を Akashi で書くため）
+test('slice, code_of and char_of count characters, not bytes, and stop on bad input', () => {
+  assert.equal(out('print(to: console, value: [slice(text: "aあ😀b", from: 1, to: 3), char_of(code: 128512)])'), '["あ😀", "😀"]\n');
+  assert.equal(out('print(to: console, value: [code_of(char: "あ"), code_of(char: "😀")])'), '[12354, 128512]\n');
+  for (const bad of ['slice(text: "ab", from: 1, to: 3)', 'slice(text: "ab", from: 2, to: 1)', 'code_of(char: "ab")', 'char_of(code: 55296)', 'char_of(code: -1)']) {
+    assert.equal(runSource(`fn main(console: Console) -> Unit do print(to: console, value: ${bad}) end`).diagnostics[0].code, 'R506', bad);
+  }
+});

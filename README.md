@@ -79,7 +79,7 @@ npm test
 | AI に教える | [SPEC.md](docs/SPEC.md)（英語・短く。プロンプトに貼る）・[llms.txt](llms.txt)（AI 向けの入口） |
 | しくみを知る | [安全の仕組み](docs/security.md)（使う道具の決まりも）・[設計の根拠](docs/DESIGN.md)（今の言語の問題点の表・AI が書きやすい言語の調べ・出典）・[コンパイラ](docs/compiler.md)（WebAssembly への書き出しと、セルフホストまでの段階） |
 
-## 今の状態（v0.10）
+## 今の状態（v0.11）
 
 - できる：Int・Bool・Str・List・Option・Result・自分で作る型、関数・再帰、if・when・match、map・filter・fold・find・sort・split・join など、約束の検査と自動の試し、鍵（画面・フォルダの読み込み）、注入できない HTML・SQL、エラーの JSON 出力。
 - コンパイラ（段階3まで）：関数を値として持つこと以外のすべて（型・match・リストと文字の関数・Html・Sql・約束・渡したフォルダのファイルを読む）を WebAssembly に0から書き出す。インタプリタと同じ答えかを毎回比べる。

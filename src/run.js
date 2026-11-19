@@ -126,6 +126,19 @@ export class Machine {
       case 'lines': return a.text === '' ? [] : a.text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');
       case 'len': return a.list.length;
       case 'str_len': return [...a.text].length;
+      case 'slice': {
+        const cps = [...a.text];
+        if (!(a.from >= 0 && a.from <= a.to && a.to <= cps.length)) this.fail('R506', `slice from ${a.from} to ${a.to} is out of range for a text of length ${cps.length}`, pos, 'check 0 <= from, from <= to and to <= str_len(text: ...) before calling slice');
+        return cps.slice(a.from, a.to).join('');
+      }
+      case 'code_of': {
+        const cps = [...a.char];
+        if (cps.length !== 1) this.fail('R506', `code_of needs exactly one character but got ${cps.length}`, pos, 'pass one character, e.g. an item of chars(text: ...)');
+        return cps[0].codePointAt(0);
+      }
+      case 'char_of':
+        if (a.code < 0 || a.code > 0x10ffff || (a.code >= 0xd800 && a.code <= 0xdfff)) this.fail('R506', `${a.code} is not a character code`, pos, 'use 0 to 1114111, except 55296 to 57343');
+        return String.fromCodePoint(a.code);
       case 'to_str': return show(a.value);
       case 'range': {
         if (a.to - a.from > 1_000_000) this.fail('R504', 'range is too large', pos, 'keep ranges under 1,000,000 items');
