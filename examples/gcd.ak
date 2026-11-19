@@ -8,8 +8,7 @@ do
   if b == 0 then a else gcd(a: b, b: a % b) end
 end
 
-fn main() -> Unit
-  effects io
+fn main(console: Console) -> Unit
 do
-  print(value: gcd(a: 1071, b: 462))
+  print(to: console, value: gcd(a: 1071, b: 462))
 end

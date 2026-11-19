@@ -9,7 +9,8 @@ const KEYWORDS = new Set([
 ]);
 const TWO_CHAR_OPS = ['->', '==', '!=', '<=', '>=', '++'];
 const ONE_CHAR_OPS = '+-*/%<>=()[],:';
-export const TYPE_NAMES = ['Int', 'Bool', 'Str', 'Unit', 'List'];
+export const CAPABILITY_TYPES = ['Console', 'Folder'];
+export const TYPE_NAMES = ['Int', 'Bool', 'Str', 'Unit', 'List', ...CAPABILITY_TYPES];
 
 export function lex(src) {
   const toks = [];
@@ -124,6 +125,9 @@ class Parser {
   program() {
     const fns = [];
     while (!this.is('eof')) {
+      if (this.isKw('end')) {
+        throw new AkashiError(diag('E108', "extra 'end'", this.peek().pos, 'every if ... then ... else ... end and every fn ... do ... end needs exactly one end. An else if is a new if inside else, so it needs its own end too: count one end per if'));
+      }
       if (!this.isKw('fn')) this.fail("'fn'", 'every top-level item is a function: fn name(arg: Type) -> Type ... do ... end');
       fns.push(this.fn());
     }
@@ -148,24 +152,17 @@ class Parser {
     if (!this.isOp('->')) this.fail("'->' and a return type", 'every function declares its return type, e.g. -> Int; write -> Unit when it returns nothing', 'E102');
     this.next();
     const ret = this.type();
-    const fn = { name, params, ret, pos, requires: [], ensures: [], examples: [], effects: [] };
+    const fn = { name, params, ret, pos, requires: [], ensures: [], examples: [] };
     for (;;) {
       if (this.isKw('requires')) { this.next(); fn.requires.push(this.clause()); continue; }
       if (this.isKw('ensures')) { this.next(); fn.ensures.push(this.clause()); continue; }
       if (this.isKw('example')) { this.next(); fn.examples.push(this.clause()); continue; }
       if (this.isKw('effects')) {
-        this.next();
-        for (;;) {
-          const e = this.expectId('an effect name', 'the only effect is io: effects io');
-          fn.effects.push({ name: e.v, pos: e.pos });
-          if (this.isOp(',')) { this.next(); continue; }
-          break;
-        }
-        continue;
+        throw new AkashiError(diag('E305', "'effects' is not used: authority is passed as capability parameters", this.peek().pos, `remove the effects line and take the capability as a parameter, e.g. fn ${name}(console: Console, ...) -> ...; call print(to: console, value: ...)`));
       }
       break;
     }
-    this.expectKw('do', `after the signature and clauses (requires / ensures / example / effects) write do, then the body, then end`);
+    this.expectKw('do', `after the signature and clauses (requires / ensures / example) write do, then the body, then end`);
     fn.body = this.block(['end']);
     this.expectKw('end', `close the body of ${name} with end`);
     return fn;
@@ -311,11 +308,6 @@ class Parser {
         throw new AkashiError(diag('E107', "'if' has no 'else'", this.peek().pos, 'every if is an expression and needs else: if c then a else b end (use else () when the value is Unit)'));
       }
       this.next();
-      // else if ... は1つの end で閉じる（end を数え間違えないように）
-      if (this.isKw('if')) {
-        const nested = this.primary();
-        return { k: 'if', cond, thenB, elseB: { lets: [], result: nested }, pos: tok.pos };
-      }
       const elseB = this.block(['end']);
       this.expectKw('end', 'close the if with end');
       return { k: 'if', cond, thenB, elseB, pos: tok.pos };

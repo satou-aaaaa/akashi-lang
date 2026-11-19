@@ -1,2 +1,2 @@
 # expect: E102
-fn main() effects io do print(value: 1) end
+fn main(console: Console) do print(to: console, value: 1) end

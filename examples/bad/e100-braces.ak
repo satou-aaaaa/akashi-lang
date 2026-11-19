@@ -1,4 +1,4 @@
 # expect: E100
-fn main() -> Unit effects io {
-  print(value: 1)
+fn main(console: Console) -> Unit {
+  print(to: console, value: 1)
 }

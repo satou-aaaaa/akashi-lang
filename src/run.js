@@ -1,4 +1,6 @@
 // 実行。requires / ensures は毎回の呼び出しで確かめる。example は check のときに全部回す。
+import { realpathSync, readFileSync, statSync } from 'node:fs';
+import { resolve, sep, isAbsolute } from 'node:path';
 import { AkashiError, diag } from './errors.js';
 
 const MAX_DEPTH = 500; // JS の呼び出しの深さに収まる数（約800で JS が先にあふれる）。長いくり返しは range と fold で書く
@@ -59,6 +61,8 @@ export class Machine {
   builtin(name, a, pos) {
     switch (name) {
       case 'print': this.out(`${show(a.value)}\n`); return null;
+      case 'read_text': return this.readText(a.from, a.path, pos);
+      case 'lines': return a.text === '' ? [] : a.text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');
       case 'len': return a.list.length;
       case 'str_len': return [...a.text].length;
       case 'to_str': return show(a.value);
@@ -77,6 +81,23 @@ export class Machine {
       case 'fold': return a.list.reduce((acc, x) => this.apply(a.func, [acc, x], pos), a.init);
       default: throw new Error(`internal: unknown function ${name}`);
     }
+  }
+
+  // Folder の権利で読めるのは、渡されたフォルダの中だけ（.. や絶対パス、外を指すリンクは止める）
+  readText(folder, path, pos) {
+    const bad = path === '' || isAbsolute(path) || path.includes('\\') || path.includes('\0') || path.split('/').some((x) => x === '..');
+    if (bad) this.fail('R507', `path '${path}' is not inside the folder`, pos, 'use a relative path without .. such as "data/input.txt"');
+    let real;
+    try {
+      real = realpathSync(resolve(folder.root, path));
+    } catch {
+      this.fail('R508', `cannot read '${path}' (it does not exist)`, pos, 'check the file name; paths are relative to the folder given with --allow-read');
+    }
+    if (real !== folder.root && !real.startsWith(folder.root + sep)) {
+      this.fail('R507', `path '${path}' points outside the folder (through a link)`, pos, 'read only files that are really inside the folder');
+    }
+    if (!statSync(real).isFile()) this.fail('R508', `'${path}' is not a file`, pos, 'give the path of a file, not a folder');
+    return readFileSync(real, 'utf8');
   }
 
   apply(ref, values, pos) {

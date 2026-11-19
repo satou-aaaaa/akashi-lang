@@ -1,6 +1,5 @@
-# いちばん小さいプログラム。io（表示）を使う関数は effects io を書く
-fn main() -> Unit
-  effects io
+# いちばん小さいプログラム。画面に出す権利（Console）は main が受け取り、使う関数へ引数で渡す
+fn main(console: Console) -> Unit
 do
-  print(value: "hello, akashi")
+  print(to: console, value: "hello, akashi")
 end

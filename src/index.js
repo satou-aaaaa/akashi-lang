@@ -2,6 +2,7 @@
 import { AkashiError, diag } from './errors.js';
 import { parse } from './parse.js';
 import { check } from './check.js';
+import { realpathSync } from 'node:fs';
 import { Machine } from './run.js';
 
 function catchAkashi(fn) {
@@ -42,17 +43,29 @@ export function checkSource(src) {
 }
 
 // 検査（example も）が通ったら main を動かす。{ ok, diagnostics, output }
-export function runSource(src, { out } = {}) {
+// grants.folder：main が Folder を求めたときに渡すフォルダ（CLI の --allow-read）。無ければ渡さない
+export function runSource(src, { out, grants = {} } = {}) {
   const c = checkSource(src);
   if (!c.ok) return { ok: false, diagnostics: c.diagnostics, output: '' };
   const a = analyze(src);
-  if (!a.program.fns.some((f) => f.name === 'main')) {
-    return { ok: false, diagnostics: [diag('E301', 'there is no main function', { line: 1, col: 1 }, 'add: fn main() -> Unit effects io do ... end')], output: '' };
+  const main = a.program.fns.find((f) => f.name === 'main');
+  if (!main) {
+    return { ok: false, diagnostics: [diag('E301', 'there is no main function', { line: 1, col: 1 }, 'add: fn main(console: Console) -> Unit do ... end')], output: '' };
+  }
+  const args = {};
+  for (const p of main.params) {
+    if (p.type.k === 'Console') args[p.name] = { cap: 'Console' };
+    if (p.type.k === 'Folder') {
+      if (!grants.folder) {
+        return { ok: false, diagnostics: [diag('R509', `main asks for a Folder ('${p.name}') but none was granted`, p.pos, 'run with --allow-read <folder> to let this program read files in that folder (and nowhere else)')], output: '' };
+      }
+      args[p.name] = { cap: 'Folder', root: realpathSync(grants.folder) };
+    }
   }
   let output = '';
   const m = new Machine(a.program, (s) => { output += s; if (out) out(s); });
-  const r = catchAkashi(() => m.callFn('main', {}, { line: 1, col: 1 }));
+  const r = catchAkashi(() => m.callFn('main', args, main.pos));
   return r.error ? { ok: false, diagnostics: [r.error], output } : { ok: true, diagnostics: [], output };
 }
 
-export { CODES, formatDiag } from './errors.js';
+export { CODES, RETIRED, formatDiag } from './errors.js';
