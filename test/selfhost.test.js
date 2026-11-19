@@ -421,10 +421,11 @@ function buildWith(compiler, dir, mainName) {
   const outDir = mkdtempSync(join(tmpdir(), 'akashi-build-out-'));
   let out = '';
   let err = '';
-  const exit = runWasm(compiler, { stdout: (s) => { out += s; }, stderr: (s) => { err += s; }, folder: openFolder(dir), outFolder: openOutFolder(outDir) });
+  const stats = {};
+  const exit = runWasm(compiler, { stdout: (s) => { out += s; }, stderr: (s) => { err += s; }, folder: openFolder(dir), outFolder: openOutFolder(outDir), stats });
   const bytes = out === 'ok\n' ? readFileSync(join(outDir, 'out.wasm')) : null;
   rmSync(outDir, { recursive: true });
-  return { out, err, exit, bytes };
+  return { out, err, exit, bytes, memoryBytes: stats.memoryBytes };
 }
 
 const bdriver = join(root, 'compiler', 'build_main.ak');
@@ -477,6 +478,9 @@ test('the compiler compiles itself to the same bytes (fixed point: stage 1 = sta
   assert.equal(s2.out, 'ok\n', s2.err);
   // 今は約 1.5 秒。メモリを 1 ページずつ増やしていたころは 30 秒かかった（2026-11-19）。大きく遅くなったら気づくように
   assert.ok(Date.now() - t0 < 20000, `the compiler took ${Date.now() - t0} ms to compile itself`);
+  // メモリは約 0.5GB（2026-11-19 に 1.7GB から減らした：字句を1ファイル1回だけ作る・行や文字の定数を塊でためる）。
+  // ごみ集めが無いので、並びを毎回まるごと写す書き方が入ると増える。4GB で R513 になる前に気づくように
+  assert.ok(s2.memoryBytes <= 1024 * 1024 * 1024, `the compiler used ${Math.round(s2.memoryBytes / 1048576)} MiB to compile itself`);
   assert.deepEqual(s2.bytes, Buffer.from(stage1Bytes()), 'stage 2 differs from stage 1');
   const s3 = buildWith(new Uint8Array(s2.bytes), dir, 'build_main.ak');
   assert.equal(s3.out, 'ok\n', s3.err);

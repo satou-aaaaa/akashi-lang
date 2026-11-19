@@ -13,7 +13,8 @@ const READ_RIGHTS = 2n | (1n << 21n); // fd_read と fd_filestat_get
 const WRITE_RIGHTS = 1n << 6n; // fd_write
 const CREAT_TRUNC = 1 | 8; // oflags：無ければ作る・あれば空にする
 
-export function runWasm(bytes, { stdout = () => {}, stderr = () => {}, folder, outFolder } = {}) {
+// stats を渡すと、終わったときのメモリの大きさ（バイト）を stats.memoryBytes に入れる（テストがメモリの使いすぎに気づくため）
+export function runWasm(bytes, { stdout = () => {}, stderr = () => {}, folder, outFolder, stats } = {}) {
   let memory;
   const decoder = new TextDecoder();
   // 渡すフォルダ（fd 3 から）。名前で見分ける
@@ -150,5 +151,7 @@ export function runWasm(bytes, { stdout = () => {}, stderr = () => {}, folder, o
   } catch (e) {
     if (e instanceof Exit) return e.code;
     throw e;
+  } finally {
+    if (stats) stats.memoryBytes = memory.buffer.byteLength;
   }
 }

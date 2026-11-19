@@ -78,8 +78,16 @@ fn take_char(st: Lex, c: Str, mode: Str, buf: Str) -> Lex
   example take_char(st: start_state(), c: "\n", mode: "none", buf: "") == Lex(mode: "none", buf: "", at_line: 1, at_col: 1, line: 2, col: 1, toks: [], err: "", rows: [[]])
 do
   match st
-    case Lex(mode: _, buf: _, at_line: al, at_col: ac, line: l, col: col, toks: ts, err: e, rows: rs) then if c == "\n" then Lex(mode: mode, buf: buf, at_line: al, at_col: ac, line: l + 1, col: 1, toks: [], err: e, rows: append(list: rs, item: ts)) else Lex(mode: mode, buf: buf, at_line: al, at_col: ac, line: l, col: col + 1, toks: ts, err: e, rows: rs) end
+    case Lex(mode: _, buf: _, at_line: al, at_col: ac, line: l, col: col, toks: ts, err: e, rows: rs) then if c == "\n" then Lex(mode: mode, buf: buf, at_line: al, at_col: ac, line: l + 1, col: 1, toks: [], err: e, rows: add_row(rows: rs, toks: ts)) else Lex(mode: mode, buf: buf, at_line: al, at_col: ac, line: l, col: col + 1, toks: ts, err: e, rows: rs) end
   end
+end
+
+# 行の字句を rows に足す。64 行たまったら1つにまとめる（毎行ぜんぶを写すと、行の数の2乗のメモリになるため。2026-11-19）
+fn add_row(rows: List[List[Token]], toks: List[Token]) -> List[List[Token]]
+  ensures len(list: result) >= 1
+  example add_row(rows: [[]], toks: []) == [[], []]
+do
+  append(list: if len(list: rows) >= 64 then [concat(lists: rows)] else rows end, item: toks)
 end
 
 # 字句の始まりを今の位置にして、1文字読む
