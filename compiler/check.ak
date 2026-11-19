@@ -10,13 +10,18 @@ type Ty
   case Ty(k: Str, name: Str, args: List[Ty])
 end
 
+# 式の型の覚え書き（鍵は node_key）
+type TyMark
+  case TyMark(key: Str, ty: Ty)
+end
+
 type Diag
   case Diag(file: Str, code: Str, line: Int, col: Int, message: Str)
 end
 
 # 検査の途中：型変数の決まり・次の型変数の番号・見つけたエラー
 type St
-  case St(subst: Dict[Ty], next: Int, diags: List[Diag], file: Str)
+  case St(subst: Dict[Ty], next: Int, diags: List[Diag], file: Str, marks: List[TyMark])
 end
 
 type TS
@@ -130,17 +135,17 @@ end
 
 fn st_new() -> St
   ensures true
-  example st_new() == St(subst: dict(keys: [], values: []), next: 1, diags: [], file: "")
+  example st_new() == St(subst: dict(keys: [], values: []), next: 1, diags: [], file: "", marks: [])
 do
-  St(subst: dict(keys: [], values: []), next: 1, diags: [], file: "")
+  St(subst: dict(keys: [], values: []), next: 1, diags: [], file: "", marks: [])
 end
 
 fn st_in(st: St, file: Str) -> St
   ensures true
-  example st_in(st: st_new(), file: "a.ak") == St(subst: dict(keys: [], values: []), next: 1, diags: [], file: "a.ak")
+  example st_in(st: st_new(), file: "a.ak") == St(subst: dict(keys: [], values: []), next: 1, diags: [], file: "a.ak", marks: [])
 do
   match st
-    case St(subst: s, next: n, diags: ds, file: _) then St(subst: s, next: n, diags: ds, file: file)
+    case St(subst: s, next: n, diags: ds, file: _, marks: m) then St(subst: s, next: n, diags: ds, file: file, marks: m)
   end
 end
 
@@ -149,7 +154,7 @@ fn st_subst(st: St) -> Dict[Ty]
   example dict_size(dict: st_subst(st: st_new())) == 0
 do
   match st
-    case St(subst: s, next: _, diags: _, file: _) then s
+    case St(subst: s, next: _, diags: _, file: _, marks: _) then s
   end
 end
 
@@ -158,7 +163,7 @@ fn st_next(st: St) -> Int
   example st_next(st: st_new()) == 1
 do
   match st
-    case St(subst: _, next: n, diags: _, file: _) then n
+    case St(subst: _, next: n, diags: _, file: _, marks: _) then n
   end
 end
 
@@ -167,17 +172,17 @@ fn st_diags(st: St) -> List[Diag]
   example st_diags(st: st_new()) == []
 do
   match st
-    case St(subst: _, next: _, diags: ds, file: _) then ds
+    case St(subst: _, next: _, diags: ds, file: _, marks: _) then ds
   end
 end
 
 # 型変数を1つ作る
 fn fresh(st: St) -> TS
   ensures true
-  example fresh(st: st_new()) == TS(ty: Ty(k: "Var", name: "1", args: []), st: St(subst: dict(keys: [], values: []), next: 2, diags: [], file: ""))
+  example fresh(st: st_new()) == TS(ty: Ty(k: "Var", name: "1", args: []), st: St(subst: dict(keys: [], values: []), next: 2, diags: [], file: "", marks: []))
 do
   match st
-    case St(subst: s, next: n, diags: ds, file: f) then TS(ty: Ty(k: "Var", name: to_str(value: n), args: []), st: St(subst: s, next: n + 1, diags: ds, file: f))
+    case St(subst: s, next: n, diags: ds, file: f, marks: mk) then TS(ty: Ty(k: "Var", name: to_str(value: n), args: []), st: St(subst: s, next: n + 1, diags: ds, file: f, marks: mk))
   end
 end
 
@@ -187,7 +192,7 @@ fn report(st: St, code: Str, n: Node, message: Str) -> St
   example st_diags(st: report(st: st_new(), code: "E200", n: Node(kind: "var", text: "x", line: 2, col: 3, kids: []), message: "m")) == [Diag(file: "", code: "E200", line: 2, col: 3, message: "m")]
 do
   match st
-    case St(subst: s, next: n2, diags: ds, file: f) then St(subst: s, next: n2, diags: append(list: ds, item: Diag(file: f, code: code, line: n_line(n: n), col: n_col(n: n), message: message)), file: f)
+    case St(subst: s, next: n2, diags: ds, file: f, marks: mk) then St(subst: s, next: n2, diags: append(list: ds, item: Diag(file: f, code: code, line: n_line(n: n), col: n_col(n: n), message: message)), file: f, marks: mk)
   end
 end
 
@@ -304,7 +309,7 @@ do
     occurs(st: st, id: ty_name(t: v), t: t) then UR(ok: false, st: st)
     else
     match st
-      case St(subst: s, next: n, diags: ds, file: f) then UR(ok: true, st: St(subst: dict_put(dict: s, key: ty_name(t: v), value: t), next: n, diags: ds, file: f))
+      case St(subst: s, next: n, diags: ds, file: f, marks: mk) then UR(ok: true, st: St(subst: dict_put(dict: s, key: ty_name(t: v), value: t), next: n, diags: ds, file: f, marks: mk))
     end
   end
 end
@@ -815,10 +820,10 @@ end
 # 組み込みの関数の形。型変数を2つぶん新しくする
 fn builtin_sig(st: St, name: Str) -> SigSt
   ensures true
-  example builtin_sig(st: st_new(), name: "len") == SigSt(sig: Sig(names: ["list"], tys: [t_list(of: Ty(k: "Var", name: "1", args: []))], ret: tk(k: "Int"), ctor: false), st: St(subst: dict(keys: [], values: []), next: 3, diags: [], file: ""))
+  example builtin_sig(st: st_new(), name: "len") == SigSt(sig: Sig(names: ["list"], tys: [t_list(of: Ty(k: "Var", name: "1", args: []))], ret: tk(k: "Int"), ctor: false), st: St(subst: dict(keys: [], values: []), next: 3, diags: [], file: "", marks: []))
 do
   match st
-    case St(subst: s, next: n, diags: ds, file: f) then SigSt(sig: read_sig(toks: lex_ok(text: builtin_text(name: name)), pos: 0, base: n, names: [], tys: []), st: St(subst: s, next: n + 2, diags: ds, file: f))
+    case St(subst: s, next: n, diags: ds, file: f, marks: mk) then SigSt(sig: read_sig(toks: lex_ok(text: builtin_text(name: name)), pos: 0, base: n, names: [], tys: []), st: St(subst: s, next: n + 2, diags: ds, file: f, marks: mk))
   end
 end
 
@@ -1148,6 +1153,50 @@ fn expr(cx: Cx, env: Env, st: St, e: Node) -> TS
   ensures true
   example ts_ty(r: expr(cx: cx_empty(), env: env_new(), st: st_new(), e: bare(kind: "int", text: "1", kids: []))) == tk(k: "Int")
 do
+  let r: TS = expr_of(cx: cx, env: env, st: st, e: e)
+  TS(ty: ts_ty(r: r), st: mark(st: ts_st(r: r), e: e, t: ts_ty(r: r)))
+end
+
+# 式の型を覚えておく（コード生成が使う。src/check.js の e.ty と同じ）
+fn mark(st: St, e: Node, t: Ty) -> St
+  ensures true
+  example st_marks(st: mark(st: st_new(), e: Node(kind: "int", text: "1", line: 2, col: 3, kids: []), t: tk(k: "Int"))) == [TyMark(key: "int 2:3", ty: tk(k: "Int"))]
+do
+  match st
+    case St(subst: s, next: n, diags: ds, file: f, marks: mk) then St(subst: s, next: n, diags: ds, file: f, marks: append(list: mk, item: TyMark(key: node_key(n: e), ty: t)))
+  end
+end
+
+# 式を見分ける鍵：種類と位置（演算子・呼び出しなどの位置はどれも違う）
+fn node_key(n: Node) -> Str
+  ensures true
+  example node_key(n: Node(kind: "bin", text: "+", line: 1, col: 5, kids: [])) == "bin 1:5"
+do
+  n_kind(n: n) ++ " " ++ to_str(value: n_line(n: n)) ++ ":" ++ to_str(value: n_col(n: n))
+end
+
+fn st_marks(st: St) -> List[TyMark]
+  ensures true
+  example st_marks(st: st_new()) == []
+do
+  match st
+    case St(subst: _, next: _, diags: _, file: _, marks: m) then m
+  end
+end
+
+fn st_clear_marks(st: St) -> St
+  ensures st_marks(st: result) == []
+  example st_clear_marks(st: st_new()) == st_new()
+do
+  match st
+    case St(subst: s, next: n, diags: ds, file: f, marks: _) then St(subst: s, next: n, diags: ds, file: f, marks: [])
+  end
+end
+
+fn expr_of(cx: Cx, env: Env, st: St, e: Node) -> TS
+  ensures true
+  example ts_ty(r: expr_of(cx: cx_empty(), env: env_new(), st: st_new(), e: bare(kind: "int", text: "1", kids: []))) == tk(k: "Int")
+do
   let k: Str = n_kind(n: e)
   when
     k == "int" then TS(ty: tk(k: "Int"), st: st)
@@ -1288,7 +1337,7 @@ end
 
 fn list_item_st(cx: Cx, env: Env, st: St, item: Ty, idx: Int, it: Node) -> St
   ensures true
-  example list_item_st(cx: cx_empty(), env: env_new(), st: st_new(), item: tk(k: "Int"), idx: 0, it: bare(kind: "int", text: "1", kids: [])) == st_new()
+  example st_diags(st: list_item_st(cx: cx_empty(), env: env_new(), st: st_new(), item: tk(k: "Int"), idx: 0, it: bare(kind: "int", text: "1", kids: []))) == []
 do
   let r: TS = expr(cx: cx, env: env, st: st, e: it)
   let t: Ty = ts_ty(r: r)
@@ -1422,7 +1471,7 @@ end
 # 知らない関数の引数も、中のエラーを見せるために調べる
 fn arg_only(w: W, a: Node) -> W
   ensures true
-  example w_st(w: arg_only(w: W(cx: cx_empty(), env: env_new(), st: st_new(), ty: t_err(), n: 0, ok: true), a: bare(kind: "arg", text: "x", kids: [bare(kind: "int", text: "1", kids: [])]))) == st_new()
+  example st_diags(st: w_st(w: arg_only(w: W(cx: cx_empty(), env: env_new(), st: st_new(), ty: t_err(), n: 0, ok: true), a: bare(kind: "arg", text: "x", kids: [bare(kind: "int", text: "1", kids: [])])))) == []
 do
   match w
     case W(cx: cx, env: env, st: st, ty: t, n: n, ok: o) then W(cx: cx, env: env, st: ts_st(r: expr(cx: cx, env: env, st: st, e: first_kid(n: a))), ty: t, n: n, ok: o)
@@ -1595,7 +1644,7 @@ end
 
 fn arg_step(w: AW, a: Node) -> AW
   ensures true
-  example arg_step(w: AW(cx: cx_empty(), env: env_new(), st: st_new(), sig: Sig(names: ["x"], tys: [tk(k: "Int")], ret: t_err(), ctor: false), fname: "f", ok: true), a: bare(kind: "arg", text: "x", kids: [bare(kind: "int", text: "1", kids: [])])) == AW(cx: cx_empty(), env: env_new(), st: st_new(), sig: Sig(names: ["x"], tys: [tk(k: "Int")], ret: t_err(), ctor: false), fname: "f", ok: true)
+  example st_diags(st: aw_st(w: arg_step(w: AW(cx: cx_empty(), env: env_new(), st: st_new(), sig: Sig(names: ["x"], tys: [tk(k: "Int")], ret: t_err(), ctor: false), fname: "f", ok: true), a: bare(kind: "arg", text: "x", kids: [bare(kind: "int", text: "1", kids: [])])))) == []
 do
   match w
     case AW(cx: cx, env: env, st: st, sig: sig, fname: fname, ok: go) then AW(cx: cx, env: env, st: arg_st(cx: cx, env: env, st: st, sig: sig, fname: fname, go: go, a: a), sig: sig, fname: fname, ok: go)
@@ -1604,7 +1653,7 @@ end
 
 fn arg_st(cx: Cx, env: Env, st: St, sig: Sig, fname: Str, go: Bool, a: Node) -> St
   ensures true
-  example arg_st(cx: cx_empty(), env: env_new(), st: st_new(), sig: Sig(names: ["x"], tys: [tk(k: "Int")], ret: t_err(), ctor: false), fname: "f", go: true, a: bare(kind: "arg", text: "x", kids: [bare(kind: "int", text: "1", kids: [])])) == st_new()
+  example st_diags(st: arg_st(cx: cx_empty(), env: env_new(), st: st_new(), sig: Sig(names: ["x"], tys: [tk(k: "Int")], ret: t_err(), ctor: false), fname: "f", go: true, a: bare(kind: "arg", text: "x", kids: [bare(kind: "int", text: "1", kids: [])]))) == []
 do
   let aname: Str = n_text(n: a)
   let has_p: Bool = aname != "" and has_str(xs: sig_names(s: sig), x: aname)
@@ -1699,7 +1748,7 @@ end
 
 fn arm_step(w: MW, arm: Node) -> MW
   ensures true
-  example arm_step(w: MW(cx: cx_empty(), env: env_new(), st: st_new(), info: TInfo(name: "A", params: [], cases: [], user: true), subst: no_subst(), seen: [], out: t_err(), out_ok: false), arm: bare(kind: "arm", text: "B", kids: [bare(kind: "at", text: "B", kids: []), bare(kind: "int", text: "1", kids: [])])) == MW(cx: cx_empty(), env: env_new(), st: report(st: st_new(), code: "E211", n: bare(kind: "at", text: "B", kids: []), message: "A has no case 'B'"), info: TInfo(name: "A", params: [], cases: [], user: true), subst: no_subst(), seen: [], out: t_err(), out_ok: false)
+  example st_diags(st: mw_st(w: arm_step(w: MW(cx: cx_empty(), env: env_new(), st: st_new(), info: TInfo(name: "A", params: [], cases: [], user: true), subst: no_subst(), seen: [], out: t_err(), out_ok: false), arm: bare(kind: "arm", text: "B", kids: [bare(kind: "at", text: "B", kids: []), bare(kind: "int", text: "1", kids: [])])))) == st_diags(st: report(st: st_new(), code: "E211", n: bare(kind: "at", text: "B", kids: []), message: "A has no case 'B'"))
 do
   match w
     case MW(cx: cx, env: env, st: st, info: info, subst: subst, seen: seen, out: out, out_ok: out_ok) then arm_in(cx: cx, env: env, st: st, info: info, subst: subst, seen: seen, out: out, out_ok: out_ok, arm: arm)
@@ -1708,7 +1757,7 @@ end
 
 fn arm_in(cx: Cx, env: Env, st: St, info: TInfo, subst: Dict[Ty], seen: List[Str], out: Ty, out_ok: Bool, arm: Node) -> MW
   ensures true
-  example arm_in(cx: cx_empty(), env: env_new(), st: st_new(), info: TInfo(name: "A", params: [], cases: [], user: true), subst: no_subst(), seen: ["B"], out: t_err(), out_ok: false, arm: bare(kind: "arm", text: "C", kids: [bare(kind: "at", text: "C", kids: []), bare(kind: "int", text: "1", kids: [])])) == MW(cx: cx_empty(), env: env_new(), st: report(st: st_new(), code: "E211", n: bare(kind: "at", text: "C", kids: []), message: "A has no case 'C'"), info: TInfo(name: "A", params: [], cases: [], user: true), subst: no_subst(), seen: ["B"], out: t_err(), out_ok: false)
+  example st_diags(st: mw_st(w: arm_in(cx: cx_empty(), env: env_new(), st: st_new(), info: TInfo(name: "A", params: [], cases: [], user: true), subst: no_subst(), seen: ["B"], out: t_err(), out_ok: false, arm: bare(kind: "arm", text: "C", kids: [bare(kind: "at", text: "C", kids: []), bare(kind: "int", text: "1", kids: [])])))) == st_diags(st: report(st: st_new(), code: "E211", n: bare(kind: "at", text: "C", kids: []), message: "A has no case 'C'"))
 do
   let v: Str = n_text(n: arm)
   let vpos: Node = kid_at(n: arm, i: 0)
@@ -1905,7 +1954,7 @@ end
 
 fn line_step(w: W, l: Node) -> W
   ensures true
-  example w_st(w: line_step(w: W(cx: cx_empty(), env: env_new(), st: st_new(), ty: t_err(), n: 0, ok: true), l: bare(kind: "do", text: "", kids: [bare(kind: "unit", text: "", kids: [])]))) == st_new()
+  example st_diags(st: w_st(w: line_step(w: W(cx: cx_empty(), env: env_new(), st: st_new(), ty: t_err(), n: 0, ok: true), l: bare(kind: "do", text: "", kids: [bare(kind: "unit", text: "", kids: [])])))) == []
 do
   match w
     case W(cx: cx, env: env, st: st, ty: t0, n: n0, ok: o) then if n_kind(n: l) == "do" then
@@ -1933,7 +1982,7 @@ end
 
 fn clause_step(w: CW, c: Node) -> CW
   ensures true
-  example clause_step(w: CW(cx: cx_empty(), env: env_new(), st: st_new(), word: "requires"), c: bare(kind: "clause", text: "true", kids: [bare(kind: "bool", text: "true", kids: [])])) == CW(cx: cx_empty(), env: env_new(), st: st_new(), word: "requires")
+  example st_diags(st: cw_st(w: clause_step(w: CW(cx: cx_empty(), env: env_new(), st: st_new(), word: "requires"), c: bare(kind: "clause", text: "true", kids: [bare(kind: "bool", text: "true", kids: [])])))) == []
 do
   match w
     case CW(cx: cx, env: env, st: st, word: word) then CW(cx: cx, env: env, st: clause_st(cx: cx, env: env, st: st, word: word, c: c), word: word)
@@ -1942,7 +1991,7 @@ end
 
 fn clause_st(cx: Cx, env: Env, st: St, word: Str, c: Node) -> St
   ensures true
-  example clause_st(cx: cx_empty(), env: env_new(), st: st_new(), word: "requires", c: bare(kind: "clause", text: "true", kids: [bare(kind: "bool", text: "true", kids: [])])) == st_new()
+  example st_diags(st: clause_st(cx: cx_empty(), env: env_new(), st: st_new(), word: "requires", c: bare(kind: "clause", text: "true", kids: [bare(kind: "bool", text: "true", kids: [])]))) == []
 do
   let r: TS = expr(cx: cx, env: env, st: st, e: first_kid(n: c))
   let u: UR = unify(st: ts_st(r: r), a: tk(k: "Bool"), b: ts_ty(r: r))
@@ -2144,18 +2193,55 @@ do
 end
 
 type FW
-  case FW(cx: Cx, st: St, firsts: Dict[Str])
+  case FW(cx: Cx, st: St, firsts: Dict[Str], typed: List[FnTypes])
+end
+
+# 関数ごとの、式の型（鍵は node_key。型変数は決まったものに置きかえ済み）
+type FnTypes
+  case FnTypes(name: Str, types: Dict[Ty])
+end
+
+type Zk
+  case Zk(st: St, out: Dict[Ty])
+end
+
+fn fn_types(name: Str, st: St) -> FnTypes
+  ensures true
+  example fn_types(name: "f", st: st_new()) == FnTypes(name: "f", types: dict(keys: [], values: []))
+do
+  match fold(list: st_marks(st: st), init: Zk(st: st, out: dict(keys: [], values: [])), func: zonk_mark)
+    case Zk(st: _, out: o) then FnTypes(name: name, types: o)
+  end
+end
+
+fn zonk_mark(z: Zk, m: TyMark) -> Zk
+  ensures true
+  example zonk_mark(z: Zk(st: st_new(), out: dict(keys: [], values: [])), m: TyMark(key: "k", ty: tk(k: "Int"))) == Zk(st: st_new(), out: dict(keys: ["k"], values: [tk(k: "Int")]))
+do
+  match z
+    case Zk(st: st, out: o) then
+      match m
+        case TyMark(key: k, ty: t) then Zk(st: st, out: dict_put(dict: o, key: k, value: zonk(st: st, t: t)))
+      end
+  end
 end
 
 # 表に入った関数だけを調べる（同じ名前の2つめは E203 で、中は調べない。JS と同じ）
 fn fn_step(w: FW, it: Item) -> FW
   ensures true
-  example fn_step(w: FW(cx: cx_empty(), st: st_new(), firsts: dict(keys: [], values: [])), it: Item(file: "", node: bare(kind: "fn", text: "f", kids: []))) == FW(cx: cx_empty(), st: st_new(), firsts: dict(keys: [], values: []))
+  example fn_step(w: FW(cx: cx_empty(), st: st_new(), firsts: dict(keys: [], values: []), typed: []), it: Item(file: "", node: bare(kind: "fn", text: "f", kids: []))) == FW(cx: cx_empty(), st: st_new(), firsts: dict(keys: [], values: []), typed: [])
 do
   let f: Node = item_node(it: it)
   match w
-    case FW(cx: cx, st: st, firsts: fs) then if dict_get(dict: fs, key: n_text(n: f)) != Some(value: item_file(it: it)) or not same_node(a: fn_node(cx: cx, name: n_text(n: f)), b: f) then w else FW(cx: cx, st: check_fn(cx0: cx, st: st_in(st: st, file: item_file(it: it)), f: f), firsts: fs) end
+    case FW(cx: cx, st: st, firsts: fs, typed: ty) then if dict_get(dict: fs, key: n_text(n: f)) != Some(value: item_file(it: it)) or not same_node(a: fn_node(cx: cx, name: n_text(n: f)), b: f) then w else fn_done(cx: cx, fs: fs, ty: ty, name: n_text(n: f), st: check_fn(cx0: cx, st: st_clear_marks(st: st_in(st: st, file: item_file(it: it))), f: f)) end
   end
+end
+
+fn fn_done(cx: Cx, fs: Dict[Str], ty: List[FnTypes], name: Str, st: St) -> FW
+  ensures true
+  example fn_done(cx: cx_empty(), fs: dict(keys: [], values: []), ty: [], name: "f", st: st_new()) == FW(cx: cx_empty(), st: st_new(), firsts: dict(keys: [], values: []), typed: [FnTypes(name: "f", types: dict(keys: [], values: []))])
+do
+  FW(cx: cx, st: st_clear_marks(st: st), firsts: fs, typed: append(list: ty, item: fn_types(name: name, st: st)))
 end
 
 fn same_node(a: Node, b: Node) -> Bool
@@ -2173,19 +2259,28 @@ fn check_program(items: List[Item]) -> List[Diag]
   example check_program(items: items_of(file: "", program: program_of(text: "fn f() -> Int ensures true example f() == 1 do 1 end"))) == []
   example check_program(items: items_of(file: "", program: program_of(text: "fn main(console: Console) -> Unit do print(to: console, value: x) end"))) == [Diag(file: "", code: "E200", line: 1, col: 64, message: "unknown name 'x'")]
 do
-  check_marked(items: mark_user_types(items: items))
+  match check_all(items: items)
+    case Typed(diags: ds, fns: _, items: _) then ds
+  end
 end
 
-fn check_marked(items: List[Item]) -> List[Diag]
+# 検査の答え：エラー（位置の順）と、関数ごとの式の型
+type Typed
+  case Typed(diags: List[Diag], fns: List[FnTypes], items: List[Item])
+end
+
+# 検査して、式の型も返す（コード生成の入口）
+fn check_all(items: List[Item]) -> Typed
   ensures true
-  example check_marked(items: []) == []
+  example check_all(items: []) == Typed(diags: [], fns: [], items: [])
 do
-  let fns: List[Item] = filter(list: items, func: item_is_fn)
+  let marked: List[Item] = mark_user_types(items: items)
+  let fns: List[Item] = filter(list: marked, func: item_is_fn)
   let s0: Setup = fold(list: builtin_type_nodes(), init: Setup(cx: cx_empty(), st: st_new(), user: false, tname: "", seen: []), func: add_type)
-  let s1: Setup = fold(list: filter(list: items, func: item_is_type), init: setup_user(s: s0), func: add_type_item)
+  let s1: Setup = fold(list: filter(list: marked, func: item_is_type), init: setup_user(s: s0), func: add_type_item)
   let s2: Setup = fold(list: fns, init: s1, func: add_fn_item)
-  match fold(list: fns, init: FW(cx: setup_cx(s: s2), st: setup_st(s: s2), firsts: first_files(fns: fns)), func: fn_step)
-    case FW(cx: _, st: s, firsts: _) then sort_diags(ds: st_diags(st: s))
+  match fold(list: fns, init: FW(cx: setup_cx(s: s2), st: setup_st(s: s2), firsts: first_files(fns: fns), typed: []), func: fn_step)
+    case FW(cx: _, st: s, firsts: _, typed: ty) then Typed(diags: sort_diags(ds: st_diags(st: s)), fns: ty, items: marked)
   end
 end
 
@@ -2326,5 +2421,32 @@ fn show_diag(d: Diag) -> Str
 do
   match d
     case Diag(file: f, code: c, line: l, col: col, message: m) then (if f == "" then "" else f ++ ": " end) ++ c ++ " " ++ to_str(value: l) ++ ":" ++ to_str(value: col) ++ " " ++ m
+  end
+end
+
+fn aw_st(w: AW) -> St
+  ensures true
+  example aw_st(w: AW(cx: cx_empty(), env: env_new(), st: st_new(), sig: Sig(names: [], tys: [], ret: t_err(), ctor: false), fname: "f", ok: true)) == st_new()
+do
+  match w
+    case AW(cx: _, env: _, st: s, sig: _, fname: _, ok: _) then s
+  end
+end
+
+fn mw_st(w: MW) -> St
+  ensures true
+  example mw_st(w: MW(cx: cx_empty(), env: env_new(), st: st_new(), info: TInfo(name: "A", params: [], cases: [], user: true), subst: no_subst(), seen: [], out: t_err(), out_ok: true)) == st_new()
+do
+  match w
+    case MW(cx: _, env: _, st: s, info: _, subst: _, seen: _, out: _, out_ok: _) then s
+  end
+end
+
+fn cw_st(w: CW) -> St
+  ensures true
+  example cw_st(w: CW(cx: cx_empty(), env: env_new(), st: st_new(), word: "x")) == st_new()
+do
+  match w
+    case CW(cx: _, env: _, st: s, word: _) then s
   end
 end
