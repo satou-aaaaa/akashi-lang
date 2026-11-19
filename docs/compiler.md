@@ -28,7 +28,7 @@ node bin/akashi.js wasm w.wasm --allow-write ./out      # 書いてよいフォ�
 - まだ扱えない書き方を使うと **E600** になります。そのプログラムは `akashi run`（インタプリタ）で動かしてください。
 - 終わりのコードは、通れば 0、実行時のエラーなら 1 です。エラーの文は標準エラーに `行:列: 番号 説明` の形で出ます。
 
-### 今（段階3）扱えるもの
+### 今（段階4まで）扱えるもの
 
 | 扱える | まだ扱えない（E600） |
 | --- | --- |
@@ -99,8 +99,8 @@ node bin/akashi.js wasm w.wasm --allow-write ./out      # 書いてよいフォ�
 | 1（済み） | Int・Bool・Str・関数・if・約束を、WebAssembly に0から書き出す。インタプリタとの差分テスト | `examples/` のうち、リストを使わないものが全部同じ答え |
 | 2（済み） | List・Option・Result・自分で作る型・match・リストの関数・文字の関数・Html/Sql。値は線形メモリに置く | `examples/` の全部（ファイル以外）が同じ答え |
 | 3（済み） | Folder（WASI の `path_open`。渡したフォルダだけを開ける）。自分の受け皿と、もう1つの WASI の実装（Node の node:wasi）の両方で確かめる。末尾呼び出し（`return_call`）は見送った（インタプリタの再帰の上限 500 と答えをそろえるため。長いくり返しは range と fold で書く） | `read_file.ak` が WASI の実行環境で、渡したフォルダだけを読んで動く |
-| 4（途中） | コンパイラを書くのに要る道具を言語に足す：文字を1文字ずつ見る・切り出す（chars・slice・code_of・char_of。済み）、辞書（Dict。済み）、ファイルに書く鍵（OutFolder・write_text。済み）、複数のファイル（use。済み）、バイトの並び（Bytes。要るかは段階5で決める） | 字句解析を Akashi で書ける |
-| 5 | Akashi でコンパイラを書く（`compiler/*.ak`）。今の JS のコンパイラ（段階0）でそれをコンパイルして `akashic.wasm`（段階1）を作る | `akashic.wasm` が `examples/` を正しくコンパイルする |
+| 4（済み） | コンパイラを書くのに要る道具を言語に足す：文字を1文字ずつ見る・切り出す（chars・slice・code_of・char_of。済み）、辞書（Dict。済み）、ファイルに書く鍵（OutFolder・write_text。済み）、複数のファイル（use。済み）、バイトを書く（write_bytes。済み。Bytes の型は作らず List[Int] にした） | 字句解析を Akashi で書ける |
+| 5（途中） | Akashi でコンパイラを書く（`compiler/*.ak`。字句解析 `compiler/lexer.ak` は済み：リポジトリの全部の .ak で JS と同じ字句になることを、インタプリタと .wasm の両方で確かめる）。今の JS のコンパイラ（段階0）でそれをコンパイルして `akashic.wasm`（段階1）を作る | `akashic.wasm` が `examples/` を正しくコンパイルする |
 | 6 | `akashic.wasm` で自分をコンパイルして段階2を作り、段階1と**1バイトも違わない**ことを確かめる（不動点） | テストで毎回確かめる。JS のコンパイラは「種」として残し、別の道で作った結果と比べる（[11]） |
 
 段階4で足す道具は、コンパイラのためだけでなく、ふつうのプログラムにも役に立つものを選びます。足すたびに [設計の根拠](DESIGN.md) の表と [言語の決まり](reference.md) を直します。

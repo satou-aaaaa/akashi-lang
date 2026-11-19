@@ -84,10 +84,11 @@ export class Machine {
     if (++this.depth > MAX_DEPTH) this.fail('R505', `recursion deeper than ${MAX_DEPTH} calls in '${name}'`, pos, 'check that the recursion reaches its base case; use fold or range for long loops');
     try {
       const env = new Map(f.params.map((p) => [p.name, args[p.name]]));
-      const argText = f.params.map((p) => `${p.name}=${show(args[p.name], true)}`).join(', ');
+      // 引数を文字にするのは、約束が破れたときだけ（毎回作ると、大きな値を渡す関数が呼ぶたびに遅くなる）
+      const argText = () => f.params.map((p) => `${p.name}=${show(args[p.name], true)}`).join(', ');
       for (const r of f.requires) {
         if (this.eval(r.expr, env) !== true) {
-          this.fail('R500', `requires of '${name}' failed: ${r.src} (with ${argText || 'no arguments'})`, pos, `the caller must pass values that satisfy '${r.src}'; check the caller, not ${name}`);
+          this.fail('R500', `requires of '${name}' failed: ${r.src} (with ${argText() || 'no arguments'})`, pos, `the caller must pass values that satisfy '${r.src}'; check the caller, not ${name}`);
         }
       }
       const result = this.block(f.body, env);
@@ -95,7 +96,7 @@ export class Machine {
       if (!envR.has('result')) envR.set('result', result);
       for (const en of f.ensures) {
         if (this.eval(en.expr, envR) !== true) {
-          this.fail('R501', `ensures of '${name}' failed: ${en.src} (result=${show(result, true)}${argText ? `, ${argText}` : ''})`, f.pos, `the body of ${name} breaks its promise; fix the body (or the ensures if the promise is wrong)`);
+          this.fail('R501', `ensures of '${name}' failed: ${en.src} (result=${show(result, true)}${argText() ? `, ${argText()}` : ''})`, f.pos, `the body of ${name} breaks its promise; fix the body (or the ensures if the promise is wrong)`);
         }
       }
       return result;
@@ -121,6 +122,11 @@ export class Machine {
       }
       case 'read_text': return this.readText(a.from, a.path, pos);
       case 'write_text': return this.writeText(a.to, a.path, a.text, pos);
+      case 'write_bytes': {
+        const bad = a.bytes.findIndex((b) => b < 0 || b > 255);
+        if (bad >= 0) this.fail('R506', `byte ${a.bytes[bad]} at index ${bad} is not between 0 and 255`, pos, 'each item of bytes must be 0 to 255; split bigger numbers into bytes first');
+        return this.writeText(a.to, a.path, Uint8Array.from(a.bytes), pos);
+      }
       case 'parse_int': {
         const t = a.text.trim();
         if (!/^-?[0-9]+$/.test(t) || !Number.isSafeInteger(Number(t))) return NONE;
@@ -232,7 +238,7 @@ export class Machine {
   writeText(out, path, text, pos) {
     this.checkPath(path, pos);
     if (path.endsWith('/') || path.split('/').some((x) => x === '' || x === '.')) this.fail('R507', `path '${path}' must be a plain file path`, pos, 'write it like "out/result.txt" (no empty parts, no ".", no / at the end)');
-    const r = out.write(path, text); // { ok } か { missing } か { escape }
+    const r = typeof text === 'string' ? out.write(path, text) : out.writeBytes(path, text); // { ok } か { missing } か { escape }
     if (r.escape) this.fail('R507', `path '${path}' goes through a link`, pos, 'links are never followed; write to the real file or folder path inside the folder');
     return r.ok ? { tag: 'Ok', fields: { value: null } } : err(r.missing);
   }
