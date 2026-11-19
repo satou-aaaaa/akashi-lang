@@ -5,6 +5,7 @@ import { check } from './check.js';
 import { realpathSync } from 'node:fs';
 import { Machine } from './run.js';
 import { fuzz } from './fuzz.js';
+import { compile } from './wasm.js';
 
 function catchAkashi(fn) {
   try {
@@ -70,6 +71,14 @@ export function runSource(src, { out, grants = {} } = {}) {
   const m = new Machine(a.program, (s) => { output += s; if (out) out(s); });
   const r = catchAkashi(() => m.callFn('main', args, main.pos));
   return r.error ? { ok: false, diagnostics: [r.error], output } : { ok: true, diagnostics: [], output };
+}
+
+// 検査（example・自動の試しも）が通ったら WebAssembly にする。{ ok, diagnostics, bytes }
+export function buildSource(src) {
+  const c = checkSource(src);
+  if (!c.ok) return { ok: false, diagnostics: c.diagnostics };
+  const a = analyze(src); // 型を節に残した木（compile が使う）
+  return compile(a.program);
 }
 
 export { CODES, RETIRED, formatDiag } from './errors.js';

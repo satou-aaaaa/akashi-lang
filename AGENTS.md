@@ -14,6 +14,9 @@ npm test
 
 ## 決まり
 
+- 依存を足さない（package.json の依存の欄は空、import は Node の標準の部品と自分のファイルだけ。test/deps.test.js が見る）。理由と例外の手順は docs/security.md「使う道具の決まり」。
+- コンパイラ（src/wasm.js）の意味の正はインタプリタ（src/run.js）。コンパイラで扱える書き方を足したら test/compile/ に境目の見本を足す（両方で同じ答えかをテストが比べる）。
+
 - エラーのコード（E100 など）の意味は変えない。新しい誤りには新しいコードを足す（AI が覚えて直せるように）。
 - コードを足したら `examples/bad/<コード>-<名前>.ak`（1行目に `# expect: <コード>`）を足し、`node scripts/gen-errors.mjs` で docs/ERRORS.md を作り直す（テストが見本の抜けと古さを落とす）。
 - どの診断にも、位置と「次にどう書けば通るか」の fix を付ける（テストが見る）。

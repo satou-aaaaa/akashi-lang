@@ -32,6 +32,7 @@ export const CODES = {
   E311: 'template holes and values do not match',
   E401: 'missing ensures',
   E402: 'missing example',
+  E600: 'not supported by the compiler yet (akashi build)',
   R500: 'requires failed',
   R501: 'ensures failed',
   R502: 'example failed',

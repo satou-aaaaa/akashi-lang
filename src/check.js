@@ -31,7 +31,7 @@ const Fn = (params, ret) => ({ k: 'Fn', params, ret });
 let varId = 0;
 const fresh = () => ({ k: 'Var', id: ++varId, ref: null });
 
-function prune(t) {
+export function prune(t) {
   while (t.k === 'Var' && t.ref) t = t.ref;
   return t;
 }
@@ -178,7 +178,14 @@ export function check(program) {
     return expr(block.result, scope, ctx);
   }
 
+  // 式の型を節に残す（コンパイラが使う。型変数は prune で引く）
   function expr(e, env, ctx) {
+    const t = exprType(e, env, ctx);
+    e.ty = t;
+    return t;
+  }
+
+  function exprType(e, env, ctx) {
     switch (e.k) {
       case 'int': return INT;
       case 'str': return STR;
