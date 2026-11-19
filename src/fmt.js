@@ -52,6 +52,9 @@ export function format(src) {
     const first = toks[0];
     const fv = first && (first.t === 'kw' || first.t === 'op') ? first.v : null;
 
+    // 続きの値（'arm'）は、次の case か match の end で閉じる
+    if ((fv === 'case' || fv === 'end') && stack[stack.length - 1] === 'arm') stack.pop();
+
     // この行の字下げ
     let depth = stack.length;
     if (fv === 'end') depth--;
@@ -67,6 +70,9 @@ export function format(src) {
 
     const body = toks.length ? joinLine(toks, line) : '';
     out.push(`${'  '.repeat(Math.max(0, depth))}${body}${body && comment ? ' ' : ''}${comment}`.trimEnd());
+
+    // case の行が then で終わり、値が次の行に続くときは、次の case か end までを1段下げる（'arm'）
+    if (fv === 'case' && stack[stack.length - 1] === 'match' && toks[toks.length - 1].t === 'kw' && toks[toks.length - 1].v === 'then') stack.push('arm');
 
     // 開け閉めを数える
     for (const t of toks) {

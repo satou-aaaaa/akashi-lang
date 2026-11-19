@@ -112,7 +112,7 @@ export const BUILTINS = {
   fold: () => { const a = fresh(); const b = fresh(); return { params: [['list', List(a)], ['init', b], ['func', Fn([b, a], b)]], ret: b }; },
 };
 
-function fromAst(t, subst = {}) {
+export function fromAst(t, subst = {}) {
   if (t.k === 'List') return List(fromAst(t.of, subst));
   if (t.k === 'Data') return Data(t.name, t.args.map((x) => fromAst(x, subst)));
   if (t.k === 'Param') return subst[t.name];
