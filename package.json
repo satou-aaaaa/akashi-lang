@@ -1,0 +1,12 @@
+{
+  "name": "akashi-lang",
+  "version": "0.1.0",
+  "description": "Akashi: a small programming language designed to be written by LLMs",
+  "type": "module",
+  "private": true,
+  "bin": { "akashi": "bin/akashi.js" },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=22" }
+}
