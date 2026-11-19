@@ -31,6 +31,16 @@ end
 - A function that takes a capability parameter needs no ensures or example. All other functions are pure.
 - Clauses come after `-> Type` and before `do`, in any order.
 
+### Several files
+
+```
+use "lib/words.ak"          # only at the top of a file, before any fn or type
+```
+
+- The path is relative to the file with the `use` line, ends in `.ak`, and stays inside the folder of the main file (no `..`, no absolute path: E113). A missing file is E114.
+- All functions and types of all used files form one program. Names must be unique across all files (E203). Using a file twice reads it once.
+- Only the file you run has `main` (E115).
+
 ## Capabilities (authority)
 
 | type | lets you | given by |

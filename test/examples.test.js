@@ -12,9 +12,9 @@ const read = (name) => readFileSync(new URL(name, dir), 'utf8');
 for (const f of readdirSync(dir).filter((x) => x.endsWith('.ak'))) {
   test(`good: ${f}`, () => {
     const src = read(f);
-    const c = checkSource(src);
+    const c = checkSource(src, { file: new URL(f, dir).pathname });
     assert.deepEqual(c.diagnostics, []);
-    const r = runSource(src, { grants: grantOf(src) });
+    const r = runSource(src, { grants: grantOf(src), file: new URL(f, dir).pathname });
     assert.equal(r.ok, true, JSON.stringify(r.diagnostics));
     assert.equal(r.output, read(f.replace(/\.ak$/, '.out')));
   });
@@ -25,7 +25,7 @@ for (const f of readdirSync(badDir).filter((x) => x.endsWith('.ak'))) {
   test(`bad: ${f}`, () => {
     const src = readFileSync(new URL(f, badDir), 'utf8');
     const want = src.match(/^# expect: (\w+)/)[1];
-    const r = runSource(src, { grants: grantOf(src) });
+    const r = runSource(src, { grants: grantOf(src), file: new URL(f, badDir).pathname });
     assert.equal(r.ok, false);
     assert.equal(r.diagnostics[0].code, want, JSON.stringify(r.diagnostics, null, 2));
     for (const d of r.diagnostics) {

@@ -11,13 +11,13 @@ import { runSource, buildSource, analyze, CODES } from '../src/index.js';
 import { runWasm } from '../src/host.js';
 import { openFolder, openOutFolder } from '../src/folder.js';
 
-function viaInterpreter(src, folder, outFolder) {
-  const r = runSource(src, { grants: { folder, outFolder } });
+function viaInterpreter(src, folder, outFolder, file) {
+  const r = runSource(src, { grants: { folder, outFolder }, file });
   return { out: r.output, exit: r.ok ? 0 : 1, code: r.ok ? null : r.diagnostics[0].code };
 }
 
-function viaWasm(src, folder, outFolder) {
-  const b = buildSource(src);
+function viaWasm(src, folder, outFolder, file) {
+  const b = buildSource(src, { file });
   if (!b.ok) return { unsupported: b.diagnostics[0] };
   assert.ok(WebAssembly.validate(b.bytes), 'the module is valid WebAssembly');
   let out = '';
@@ -26,10 +26,10 @@ function viaWasm(src, folder, outFolder) {
   return { out, exit, code: err.match(/\b([ER]\d{3})\b/)?.[1] ?? null, err };
 }
 
-const same = (src, label, folder) => {
-  const w = viaWasm(src, folder);
+const same = (src, label, folder, file) => {
+  const w = viaWasm(src, folder, undefined, file);
   if (w.unsupported) return false;
-  const i = viaInterpreter(src, folder);
+  const i = viaInterpreter(src, folder, undefined, file);
   assert.deepEqual({ out: w.out, exit: w.exit, code: w.code }, i, `${label}\n${w.err ?? ''}`);
   return true;
 };
@@ -41,8 +41,8 @@ for (const dir of dirs) {
     const src = readFileSync(new URL(f, dir), 'utf8');
     const grant = src.match(/^# grant: (.+)$/m)?.[1];
     test(`wasm and interpreter agree: ${f}`, () => {
-      if (same(src, f, grant && fileURLToPath(new URL(`../${grant}`, import.meta.url)))) compiled++;
-      else assert.ok(!dir.href.endsWith('/compile/'), `${f} in test/compile must be supported by the compiler`);
+      if (same(src, f, grant && fileURLToPath(new URL(`../${grant}`, import.meta.url)), fileURLToPath(new URL(f, dir)))) compiled++;
+      else assert.fail(`${f} must be supported by the compiler (examples and test/compile)`);
     });
   }
 }

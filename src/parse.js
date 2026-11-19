@@ -3,7 +3,7 @@
 import { AkashiError, diag, suggest } from './errors.js';
 
 export const KEYWORDS = new Set([
-  'fn', 'do', 'end', 'let', 'if', 'then', 'else', 'when', 'type', 'case', 'match',
+  'fn', 'do', 'end', 'let', 'if', 'then', 'else', 'when', 'type', 'case', 'match', 'use',
   'requires', 'ensures', 'example', 'effects',
   'and', 'or', 'not', 'true', 'false',
 ]);
@@ -17,7 +17,8 @@ export const BUILTIN_DATA = ['Option', 'Result'];
 export const TYPE_NAMES = ['Int', 'Bool', 'Str', 'Unit', 'List', 'Dict', ...BUILTIN_DATA, ...SAFE_TYPES, ...CAPABILITY_TYPES];
 const isUpper = (w) => /^[A-Z]/.test(w);
 
-export function lex(src) {
+// file：使う側から読んだファイルの名前（main のファイルなら無し）。位置に付けて、エラーがどのファイルかを見せる
+export function lex(src, file) {
   const toks = [];
   let i = 0;
   let line = 1;
@@ -34,7 +35,7 @@ export function lex(src) {
     const c = src[i];
     if (c === ' ' || c === '\t' || c === '\r' || c === '\n') { adv(); continue; }
     if (c === '#') { while (i < src.length && src[i] !== '\n') adv(); continue; }
-    const pos = { line, col, offset: i };
+    const pos = file ? { line, col, offset: i, file } : { line, col, offset: i };
     if (/[0-9]/.test(c)) {
       let j = i;
       while (j < src.length && /[0-9]/.test(src[j])) j++;
@@ -90,7 +91,7 @@ export function lex(src) {
     const hint = { '{': 'blocks use do ... end, not { }', '}': 'blocks use do ... end, not { }', ';': 'statements are separated by new lines; remove the ;', '&': 'use and', '|': 'use or', '!': 'use not (or != for "not equal")', '.': 'there are no methods; call functions with named arguments, e.g. len(list: xs)', "'": 'strings use double quotes "..."' };
     fail('E100', `unexpected character '${c}'`, pos, hint[c] ?? 'remove this character');
   }
-  toks.push({ t: 'eof', pos: { line, col, offset: i }, end: i });
+  toks.push({ t: 'eof', pos: file ? { line, col, offset: i, file } : { line, col, offset: i }, end: i });
   return toks;
 }
 
@@ -101,12 +102,12 @@ function show(tok) {
 }
 
 class Parser {
-  constructor(src, toks) {
+  constructor(src, toks, otherTypes = []) {
     this.src = src;
     this.toks = toks;
     this.i = 0;
-    // 型の名前は先に集める（宣言より前の関数でも使えるように）
-    this.userTypes = toks.flatMap((t, i) => (t.t === 'kw' && t.v === 'type' && toks[i + 1]?.t === 'id' ? [toks[i + 1].v] : []));
+    // 型の名前は先に集める（宣言より前の関数でも、use で読んだファイルの型でも使えるように）
+    this.userTypes = [...new Set([...typeNamesIn(toks), ...otherTypes])];
     this.typeNames = [...TYPE_NAMES, ...this.userTypes];
   }
   peek(k = 0) { return this.toks[Math.min(this.i + k, this.toks.length - 1)]; }
@@ -133,7 +134,15 @@ class Parser {
   program() {
     const fns = [];
     const types = [];
+    const uses = [];
+    // use "file.ak" は、ファイルのはじめ（fn・type より前）にだけ書ける
+    while (this.isKw('use')) {
+      const pos = this.next().pos;
+      if (!this.is('str')) this.fail('a file name in quotes', 'write use "other.ak"');
+      uses.push({ path: this.next().v, pos });
+    }
     while (!this.is('eof')) {
+      if (this.isKw('use')) this.fail("'fn' or 'type'", 'write every use line at the top of the file, before the first fn or type');
       if (this.isKw('type')) { types.push(this.typeDecl()); continue; }
       if (this.isKw('end')) {
         throw new AkashiError(diag('E108', "extra 'end'", this.peek().pos, 'every if ... then ... else ... end and every fn ... do ... end needs exactly one end. An else if is a new if inside else, so it needs its own end too: count one end per if'));
@@ -141,7 +150,7 @@ class Parser {
       if (!this.isKw('fn')) this.fail("'fn' or 'type'", 'every top-level item is a function (fn name(arg: Type) -> Type ... do ... end) or a type (type Name case A(x: Int) case B end)');
       fns.push(this.fn());
     }
-    return { fns, types };
+    return { fns, types, uses };
   }
 
   // type Shape
@@ -450,6 +459,19 @@ class Parser {
   }
 }
 
-export function parse(src) {
-  return new Parser(src, lex(src)).program();
+// 1つのファイルを読む。otherTypes：use で読むほかのファイルで決めた型の名前
+export function parse(src, { file, otherTypes } = {}) {
+  return new Parser(src, lex(src, file), otherTypes).program();
+}
+
+// 字句だけから、use の行と、このファイルで決めた型の名前を取り出す（全部のファイルの型を先に集めるため）
+export function scan(src, file) {
+  const toks = lex(src, file);
+  const uses = [];
+  for (let i = 0; toks[i]?.t === 'kw' && toks[i].v === 'use' && toks[i + 1]?.t === 'str'; i += 2) uses.push({ path: toks[i + 1].v, pos: toks[i].pos });
+  return { uses, types: typeNamesIn(toks) };
+}
+
+function typeNamesIn(toks) {
+  return toks.flatMap((t, i) => (t.t === 'kw' && t.v === 'type' && toks[i + 1]?.t === 'id' ? [toks[i + 1].v] : []));
 }

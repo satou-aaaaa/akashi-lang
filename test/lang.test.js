@@ -253,3 +253,33 @@ test('slice, code_of and char_of count characters, not bytes, and stop on bad in
     assert.equal(runSource(`fn main(console: Console) -> Unit do print(to: console, value: ${bad}) end`).diagnostics[0].code, 'R506', bad);
   }
 });
+
+// 複数のファイル（use）。パスの決まり・エラーの場所・名前の重なり・輪・ブラウザ（読む方法が無い）
+test('use reads other files, reports errors in the file where they are, and keeps names unique', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const core = await import('../src/core.js');
+  const dir = mkdtempSync(join(tmpdir(), 'akashi-use-'));
+  mkdirSync(join(dir, 'lib'));
+  const put = (name, text) => writeFileSync(join(dir, name), text);
+  const main = (uses, body = 'print(to: console, value: 1)') => `${uses.map((u) => `use "${u}"`).join('\n')}\n\nfn main(console: Console) -> Unit\ndo\n  ${body}\nend\n`;
+  const pure = (name, body = 'n + 1') => `fn ${name}(n: Int) -> Int\n  ensures true\n  example ${name}(n: 1) == ${name}(n: 1)\ndo\n  ${body}\nend\n`;
+  const run = (src) => runSource(src, { file: join(dir, 'main.ak') });
+  put('lib/a.ak', `use "b.ak"\n\n${pure('inc_a', 'inc_b(n: n)')}`);
+  put('lib/b.ak', `use "a.ak"\n\n${pure('inc_b')}`); // 輪になっていてもよい
+  assert.equal(run(main(['lib/a.ak'], 'print(to: console, value: inc_a(n: 1))')).output, '2\n');
+  put('lib/bad.ak', pure('oops', 'n + "x"'));
+  const bad = run(main(['lib/bad.ak'])).diagnostics[0];
+  assert.equal(bad.code, 'E201');
+  assert.equal(bad.file, 'lib/bad.ak');
+  assert.equal(bad.line, 5);
+  put('lib/dup.ak', pure('inc_b'));
+  assert.equal(run(main(['lib/a.ak', 'lib/dup.ak'])).diagnostics[0].code, 'E203');
+  for (const p of ['../x.ak', '/x.ak', 'lib\\\\a.ak', 'lib/a.txt', 'lib//a.ak', 'C:a.ak']) assert.equal(run(main([p])).diagnostics[0].code, 'E113', p);
+  assert.equal(run(main(['lib/none.ak'])).diagnostics[0].code, 'E114');
+  // ブラウザ（遊べるページ）にはファイルが無い
+  assert.equal(core.runSource(main(['lib/a.ak'])).diagnostics[0].code, 'E114');
+  // use は fn・type より前だけ
+  assert.equal(run(`${pure('f')}\nuse "lib/a.ak"\n`).diagnostics[0].code, 'E100');
+});

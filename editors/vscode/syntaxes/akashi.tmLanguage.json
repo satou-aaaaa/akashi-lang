@@ -32,6 +32,7 @@
     "keyword": {
       "patterns": [
         { "name": "keyword.control.akashi", "match": "\\b(do|end|if|then|else|when|match|case)\\b" },
+        { "name": "keyword.other.import.akashi", "match": "\\buse\\b" },
         { "name": "keyword.other.contract.akashi", "match": "\\b(requires|ensures|example)\\b" },
         { "name": "keyword.operator.logical.akashi", "match": "\\b(and|or|not)\\b" },
         { "name": "constant.language.boolean.akashi", "match": "\\b(true|false)\\b" },
