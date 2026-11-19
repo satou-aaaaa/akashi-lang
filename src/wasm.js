@@ -262,7 +262,11 @@ class Compiler {
           ...op.globalGet(G.heap), ...op.localGet(1), ...op.i32LtU, ...op.if(EMPTY), ...op.i32(r513), ...op.call(h.fail), ...op.end,
           ...op.block(EMPTY), ...op.loop(EMPTY),
           ...op.globalGet(G.heap), ...op.memorySize, ...op.i32(16), ...op.i32Shl, ...op.i32LtU, ...op.brIf(1),
+          // 今の大きさだけ増やす（倍にする）。1 ページずつだと、大きなプログラムで何万回も増やして遅い（2026-11-19、自分のコンパイルが 30 秒）。
+          // 倍にできなければ 1 ページだけ。それもできなければ R513
+          ...op.memorySize, ...op.memoryGrow, ...op.i32(-1), ...op.i32Eq, ...op.if(EMPTY),
           ...op.i32(1), ...op.memoryGrow, ...op.i32(-1), ...op.i32Eq, ...op.if(EMPTY), ...op.i32(r513), ...op.call(h.fail), ...op.end,
+          ...op.end,
           ...op.br(0), ...op.end, ...op.end,
           ...op.localGet(1), ...op.end,
         ],
