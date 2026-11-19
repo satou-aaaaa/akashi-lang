@@ -3,6 +3,12 @@
 版の決め方：試作のあいだは 0.x。言語の決まりが変わる（前に通ったプログラムが通らなくなる）ときは、2つめの数を上げる。
 形は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) にならう。
 
+## 0.9.0 — 2026-11-19
+
+### 足した
+- コンパイラ（段階2の後半）：chars・split・join・contains・starts_with・ends_with・lines・html・html_text・html_join・sql を WebAssembly に書き出す。`examples/` のうちファイルを読むもの以外は、全部コンパイルできるようになった。
+- インタプリタと比べるテストに、自動で作った文字の式 200 個と、境目の見本（strings・split の空の区切り・穴の数の違い）を足した。
+
 ## 0.8.0 — 2026-11-19
 
 ### 足した

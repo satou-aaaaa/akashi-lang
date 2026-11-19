@@ -3,7 +3,8 @@
 // 意味の正はインタプリタ（src/run.js）。同じプログラムの出力・終わりのコード・エラー番号が一致することを test/compile.test.js が毎回比べる。
 //
 // 扱えるもの：Int・Bool・Str・Unit・List・Option・Result・自分で作る型、関数・再帰、let、if・when・match、requires・ensures、
-//   print・to_str・str_len・parse_int・trim、リストの関数（len・get・at・range・append・map・filter・fold・find・any・all・
+//   print・to_str・str_len・parse_int・trim・chars・split・join・contains・starts_with・ends_with・lines、
+//   html・html_text・html_join・sql（Html は文字と同じ形。Sql は [型紙][値のリスト]）、リストの関数（len・get・at・range・append・map・filter・fold・find・any・all・
 //   reverse・take・drop・sort・sum・max・min）、+ - * / %、比較（== は中身まで比べる）、and・or・not、++（Str・List）。
 // それ以外を使うと E600（コンパイラがまだ扱えない）。そのプログラムは akashi run（インタプリタ）で動かす。
 //
@@ -60,7 +61,7 @@ const op = {
   i32Store: (off = 0) => [0x36, 2, ...uleb(off)], i32Store8: (off = 0) => [0x3a, 0, ...uleb(off)],
   memorySize: [0x3f, 0], memoryGrow: [0x40, 0],
   i32: (n) => [0x41, ...sleb(n)], i64: (n) => [0x42, ...sleb(n)],
-  i32Eqz: [0x45], i32Eq: [0x46], i32Ne: [0x47], i32LtS: [0x48], i32LtU: [0x49], i32GtU: [0x4b], i32LeU: [0x4d], i32GeU: [0x4f],
+  i32Eqz: [0x45], i32Eq: [0x46], i32Ne: [0x47], i32LtS: [0x48], i32LtU: [0x49], i32GtU: [0x4b], i32LeU: [0x4d], i32GeU: [0x4f], i32GtS: [0x4a], i32GeS: [0x4e],
   i64Eqz: [0x50], i64Eq: [0x51], i64Ne: [0x52], i64LtS: [0x53], i64GtS: [0x55], i64LeS: [0x57], i64GeS: [0x59],
   i32Add: [0x6a], i32Sub: [0x6b], i32Mul: [0x6c], i32And: [0x71], i32Or: [0x72], i32Xor: [0x73], i32Shl: [0x74], i32ShrU: [0x76],
   i64Add: [0x7c], i64Sub: [0x7d], i64Mul: [0x7e], i64DivS: [0x7f], i64DivU: [0x80], i64RemS: [0x81], i64RemU: [0x82],
@@ -74,13 +75,14 @@ class Unsupported extends Error {
 }
 
 const LIST_BUILTINS = ['len', 'get', 'at', 'range', 'append', 'map', 'filter', 'fold', 'find', 'any', 'all', 'reverse', 'take', 'drop', 'sort', 'sum', 'max', 'min'];
-const SUPPORTED_BUILTINS = ['print', 'to_str', 'str_len', 'parse_int', 'trim', ...LIST_BUILTINS];
+const TEXT_BUILTINS = ['chars', 'split', 'join', 'contains', 'starts_with', 'ends_with', 'lines', 'html', 'html_text', 'html_join', 'sql'];
+const SUPPORTED_BUILTINS = ['print', 'to_str', 'str_len', 'parse_int', 'trim', ...LIST_BUILTINS, ...TEXT_BUILTINS];
 
 function valType(t) {
   t = prune(t);
   switch (t.k) {
     case 'Int': return I64;
-    case 'Bool': case 'Str': case 'List': case 'Data': return I32;
+    case 'Bool': case 'Str': case 'List': case 'Data': case 'Html': case 'Sql': return I32;
     case 'Unit': return null;
     case 'Var': return null; // まだ決まらない型（空のリストの要素など）。値は1つも作られないので、何も置かない
     default: return undefined;
@@ -521,6 +523,7 @@ class Compiler {
     }
     if (!SUPPORTED_BUILTINS.includes(e.name)) throw new Unsupported(`the built-in function ${e.name}`, e.pos);
     if (LIST_BUILTINS.includes(e.name)) return this.listBuiltin(e, A, arg, scope, ctx);
+    if (TEXT_BUILTINS.includes(e.name)) return this.textBuiltin(e, A, arg, ctx);
     switch (e.name) {
       case 'str_len': return [...A('text'), ...op.call(this.h.strlen)];
       case 'trim': return [...A('text'), ...op.call(this.trimFn())];
@@ -603,6 +606,8 @@ class Compiler {
     t = prune(t);
     switch (t.k) {
       case 'Str': return nested ? [...code, ...op.call(this.quoteFn())] : code;
+      case 'Html': return code; // 入れ子でもそのまま
+      case 'Sql': return [...code, ...op.call(this.showSqlFn())];
       case 'Int': return [...code, ...op.call(this.h.itoa)];
       case 'Bool': return [...code, ...op.if(I32), ...op.i32(this.str('true')), ...op.else, ...op.i32(this.str('false')), ...op.end];
       case 'Unit': case 'Var': return [...code, ...op.i32(this.str('()'))];
@@ -694,6 +699,7 @@ class Compiler {
       case 'Int': return [...a, ...b, ...op.i64Eq];
       case 'Bool': return [...a, ...b, ...op.i32Eq];
       case 'Str': return [...a, ...b, ...op.call(this.h.streq)];
+      case 'Html': case 'Sql': return [...a, ...b, ...op.i32Eq]; // インタプリタと同じく、同じ値（作ったもの）どうしだけが等しい
       case 'Unit': case 'Var': return [...a, ...b, ...op.i32(1)];
       case 'List': return [...a, ...b, ...op.call(this.eqListFn(t, pos))];
       case 'Data': return [...a, ...b, ...op.call(this.eqDataFn(t, pos))];
@@ -1000,6 +1006,254 @@ class Compiler {
         ...this.mkData(opt, 'Some', [[...op.localGet(neg), ...op.if(I64), ...op.i64(0), ...op.localGet(acc), ...op.i64Sub, ...op.else, ...op.localGet(acc), ...op.end]], { local: () => p }, null),
       ];
     });
+  }
+  // 新しい文字（長さ n バイト、中身はまだ）を作る。場所を局所変数 p に入れる
+  newStr(n, p) {
+    return [...n, ...op.i32(4), ...op.i32Add, ...op.call(this.h.alloc), ...op.localTee(p), ...n, ...op.i32Store(0)];
+  }
+
+  // s の中で、at バイト目から part が続いていれば 1（範囲の外なら 0）
+  matchAtFn() {
+    return this.gen('match at', [I32, I32, I32], [I32], (local) => {
+      const [m, k] = [local(I32), local(I32)];
+      return [
+        ...op.localGet(2), ...op.i32Load(0), ...op.localSet(m),
+        ...op.localGet(1), ...op.i32(0), ...op.i32LtS,
+        ...op.localGet(1), ...op.localGet(m), ...op.i32Add, ...op.localGet(0), ...op.i32Load(0), ...op.i32GtU, ...op.i32Or,
+        ...op.if(EMPTY), ...op.i32(0), ...op.return, ...op.end,
+        ...forEach(k, m, [
+          ...op.localGet(0), ...op.localGet(1), ...op.i32Add, ...op.localGet(k), ...op.i32Add, ...op.i32Load8u(4),
+          ...op.localGet(2), ...op.localGet(k), ...op.i32Add, ...op.i32Load8u(4), ...op.i32Ne,
+          ...op.if(EMPTY), ...op.i32(0), ...op.return, ...op.end,
+        ]),
+        ...op.i32(1),
+      ];
+    });
+  }
+
+  // s の from バイト目から後ろで、part が最初に出てくる場所。無ければ -1
+  indexOfFn() {
+    const at = this.matchAtFn();
+    return this.gen('index of', [I32, I32, I32], [I32], (local) => {
+      const [last] = [local(I32)];
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localGet(1), ...op.i32Load(0), ...op.i32Sub, ...op.localSet(last),
+        ...op.block(EMPTY), ...op.loop(EMPTY),
+        ...op.localGet(2), ...op.localGet(last), ...op.i32GtS, ...op.brIf(1),
+        ...op.localGet(0), ...op.localGet(2), ...op.localGet(1), ...op.call(at), ...op.if(EMPTY), ...op.localGet(2), ...op.return, ...op.end,
+        ...op.localGet(2), ...op.i32(1), ...op.i32Add, ...op.localSet(2), ...op.br(0),
+        ...op.end, ...op.end,
+        ...op.i32(-1),
+      ];
+    });
+  }
+
+  // s の from から to（バイト）を切り出した新しい文字
+  sliceFn() {
+    return this.gen('slice', [I32, I32, I32], [I32], (local) => {
+      const p = local(I32);
+      const n = [...op.localGet(2), ...op.localGet(1), ...op.i32Sub];
+      return [
+        ...this.newStr(n, p),
+        ...op.localGet(p), ...op.i32(4), ...op.i32Add, ...op.localGet(0), ...op.i32(4), ...op.i32Add, ...op.localGet(1), ...op.i32Add, ...n, ...op.memoryCopy,
+        ...op.localGet(p),
+      ];
+    });
+  }
+
+  // split(text, by)：by は空でないこと（呼ぶ側で確かめる）。JavaScript の split と同じく、左から重ならないように切る
+  splitFn() {
+    const find = this.indexOfFn();
+    const slice = this.sliceFn();
+    return this.gen('split', [I32, I32], [I32], (local) => {
+      const [n, at, from, p, k] = [local(I32), local(I32), local(I32), local(I32), local(I32)];
+      const next = [...op.localGet(0), ...op.localGet(1), ...op.localGet(from), ...op.call(find), ...op.localSet(at)];
+      const step = [...op.localGet(at), ...op.localGet(1), ...op.i32Load(0), ...op.i32Add, ...op.localSet(from)];
+      return [
+        // 1回目：いくつに分かれるかを数える
+        ...op.i32(1), ...op.localSet(n), ...op.i32(0), ...op.localSet(from),
+        ...op.block(EMPTY), ...op.loop(EMPTY),
+        ...next, ...op.localGet(at), ...op.i32(0), ...op.i32LtS, ...op.brIf(1),
+        ...op.localGet(n), ...op.i32(1), ...op.i32Add, ...op.localSet(n), ...step, ...op.br(0),
+        ...op.end, ...op.end,
+        // 2回目：切り出して入れる
+        ...this.newList(n, p), ...op.i32(0), ...op.localSet(from), ...op.i32(0), ...op.localSet(k),
+        ...op.block(EMPTY), ...op.loop(EMPTY),
+        ...next, ...op.localGet(at), ...op.i32(0), ...op.i32LtS, ...op.brIf(1),
+        ...elemAddr(p, k), ...op.localGet(0), ...op.localGet(from), ...op.localGet(at), ...op.call(slice), ...op.i32Store(8),
+        ...op.localGet(k), ...op.i32(1), ...op.i32Add, ...op.localSet(k), ...step, ...op.br(0),
+        ...op.end, ...op.end,
+        ...elemAddr(p, k), ...op.localGet(0), ...op.localGet(from), ...op.localGet(0), ...op.i32Load(0), ...op.call(slice), ...op.i32Store(8),
+        ...op.localGet(p),
+      ];
+    });
+  }
+
+  // 1文字（コードポイント）ずつのリスト
+  charsFn() {
+    const slice = this.sliceFn();
+    return this.gen('chars', [I32], [I32], (local) => {
+      const [len, i, n, p, b, w] = [local(I32), local(I32), local(I32), local(I32), local(I32), local(I32)];
+      // 先頭のバイトから、その文字のバイト数
+      const width = [
+        ...op.localGet(0), ...op.localGet(i), ...op.i32Add, ...op.i32Load8u(4), ...op.localTee(b), ...op.i32(0x80), ...op.i32LtU,
+        ...op.if(I32), ...op.i32(1), ...op.else,
+        ...op.localGet(b), ...op.i32(0xe0), ...op.i32LtU, ...op.if(I32), ...op.i32(2), ...op.else,
+        ...op.localGet(b), ...op.i32(0xf0), ...op.i32LtU, ...op.if(I32), ...op.i32(3), ...op.else, ...op.i32(4), ...op.end, ...op.end, ...op.end,
+        ...op.localSet(w),
+      ];
+      const walk = (body) => [
+        ...op.i32(0), ...op.localSet(i),
+        ...op.block(EMPTY), ...op.loop(EMPTY),
+        ...op.localGet(i), ...op.localGet(len), ...op.i32GeU, ...op.brIf(1),
+        ...width, ...body,
+        ...op.localGet(i), ...op.localGet(w), ...op.i32Add, ...op.localSet(i), ...op.br(0),
+        ...op.end, ...op.end,
+      ];
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localSet(len),
+        ...walk([...op.localGet(n), ...op.i32(1), ...op.i32Add, ...op.localSet(n)]),
+        ...this.newList(n, p), ...op.i32(0), ...op.localSet(n),
+        ...walk([
+          ...elemAddr(p, n), ...op.localGet(0), ...op.localGet(i), ...op.localGet(i), ...op.localGet(w), ...op.i32Add, ...op.call(slice), ...op.i32Store(8),
+          ...op.localGet(n), ...op.i32(1), ...op.i32Add, ...op.localSet(n),
+        ]),
+        ...op.localGet(p),
+      ];
+    });
+  }
+
+  // join(parts, by)。新しい文字を作る（parts が空でも新しい空の文字）
+  joinFn() {
+    return this.gen('join', [I32, I32], [I32], (local) => {
+      const [n, i, acc] = [local(I32), local(I32), local(I32)];
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n),
+        ...op.i32(this.str('')), ...op.i32(this.str('')), ...op.call(this.h.concat), ...op.localSet(acc),
+        ...forEach(i, n, [
+          ...op.localGet(i), ...op.if(EMPTY), ...op.localGet(acc), ...op.localGet(1), ...op.call(this.h.concat), ...op.localSet(acc), ...op.end,
+          ...op.localGet(acc), ...elemAddr(0, i), ...op.i32Load(8), ...op.call(this.h.concat), ...op.localSet(acc),
+        ]),
+        ...op.localGet(acc),
+      ];
+    });
+  }
+
+  // lines：空なら []。\r\n を \n にそろえ、最後の \n を1つ落としてから \n で切る
+  linesFn() {
+    const split = this.splitFn();
+    return this.gen('lines', [I32], [I32], (local) => {
+      const [n, i, w, p, b] = [local(I32), local(I32), local(I32), local(I32), local(I32)];
+      const byte = (k) => [...op.localGet(0), ...op.localGet(i), ...op.i32Add, ...op.i32Load8u(4 + k)];
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localTee(n), ...op.i32Eqz, ...op.if(EMPTY), ...op.i32(0), ...op.localSet(n), ...this.newList(n, p), ...op.localGet(p), ...op.return, ...op.end,
+        ...this.newStr(op.localGet(n), p), ...op.localGet(p), ...op.i32(4), ...op.i32Add, ...op.localSet(w),
+        ...forEach(i, n, [
+          ...op.block(EMPTY),
+          // \r のすぐ後ろが \n なら、\r は写さない
+          ...byte(0), ...op.localTee(b), ...op.i32(13), ...op.i32Eq,
+          ...op.localGet(i), ...op.i32(1), ...op.i32Add, ...op.localGet(n), ...op.i32LtU, ...op.i32And,
+          ...op.if(EMPTY), ...byte(1), ...op.i32(10), ...op.i32Eq, ...op.brIf(1), ...op.end,
+          ...op.localGet(w), ...op.localGet(b), ...op.i32Store8(0), ...op.localGet(w), ...op.i32(1), ...op.i32Add, ...op.localSet(w),
+          ...op.end,
+        ]),
+        // 最後の \n を1つ落とす
+        ...op.localGet(w), ...op.localGet(p), ...op.i32(4), ...op.i32Add, ...op.i32Sub, ...op.localSet(n),
+        ...op.localGet(n), ...op.if(EMPTY),
+        ...op.localGet(w), ...op.i32(1), ...op.i32Sub, ...op.i32Load8u(0), ...op.i32(10), ...op.i32Eq, ...op.if(EMPTY), ...op.localGet(n), ...op.i32(1), ...op.i32Sub, ...op.localSet(n), ...op.end,
+        ...op.end,
+        ...op.localGet(p), ...op.localGet(n), ...op.i32Store(0),
+        ...op.localGet(p), ...op.i32(this.str('\n')), ...op.call(split),
+      ];
+    });
+  }
+
+  // html_text：& < > " ' を置きかえた新しい文字（インタプリタの escapeHtml と同じ）
+  escapeFn() {
+    return this.gen('escape html', [I32], [I32], (local) => {
+      const [n, i, out, w, b] = [local(I32), local(I32), local(I32), local(I32), local(I32)];
+      const put = (text) => utf8(text).flatMap((c) => [...op.localGet(w), ...op.i32(c), ...op.i32Store8(0), ...op.localGet(w), ...op.i32(1), ...op.i32Add, ...op.localSet(w)]);
+      const esc = (c, text) => [...op.localGet(b), ...op.i32(c.charCodeAt(0)), ...op.i32Eq, ...op.if(EMPTY), ...put(text), ...op.br(1), ...op.end];
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n),
+        ...op.localGet(n), ...op.i32(6), ...op.i32Mul, ...op.i32(4), ...op.i32Add, ...op.call(this.h.alloc), ...op.localSet(out),
+        ...op.localGet(out), ...op.i32(4), ...op.i32Add, ...op.localSet(w),
+        ...forEach(i, n, [
+          ...op.block(EMPTY),
+          ...op.localGet(0), ...op.localGet(i), ...op.i32Add, ...op.i32Load8u(4), ...op.localSet(b),
+          ...esc('&', '&amp;'), ...esc('<', '&lt;'), ...esc('>', '&gt;'), ...esc('"', '&quot;'), ...esc("'", '&#39;'),
+          ...op.localGet(w), ...op.localGet(b), ...op.i32Store8(0), ...op.localGet(w), ...op.i32(1), ...op.i32Add, ...op.localSet(w),
+          ...op.end,
+        ]),
+        ...op.localGet(out), ...op.localGet(w), ...op.localGet(out), ...op.i32Sub, ...op.i32(4), ...op.i32Sub, ...op.i32Store(0),
+        ...op.localGet(out),
+      ];
+    });
+  }
+
+  // Sql の表示：型紙 -- params: ["a","b"]（JSON.stringify と同じ形）
+  showSqlFn() {
+    return this.gen('show Sql', [I32], [I32], (local) => {
+      const [n, i, acc, v] = [local(I32), local(I32), local(I32), local(I32)];
+      const cat = (code) => [...op.localGet(acc), ...code, ...op.call(this.h.concat), ...op.localSet(acc)];
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localSet(acc), ...cat(op.i32(this.str(' -- params: ['))),
+        ...op.localGet(0), ...op.i32Load(4), ...op.localTee(v), ...op.i32Load(0), ...op.localSet(n),
+        ...forEach(i, n, [
+          ...op.localGet(i), ...op.if(EMPTY), ...cat(op.i32(this.str(','))), ...op.end,
+          ...cat([...elemAddr(v, i), ...op.i32Load(8), ...op.call(this.quoteFn())]),
+        ]),
+        ...cat(op.i32(this.str(']'))), ...op.localGet(acc),
+      ];
+    });
+  }
+
+  textBuiltin(e, A, arg, ctx) {
+    const pos = e.pos;
+    switch (e.name) {
+      case 'chars': return [...A('text'), ...op.call(this.charsFn())];
+      case 'split': {
+        const by = ctx.local(I32);
+        return [...A('text'), ...A('by'), ...op.localTee(by), ...op.i32Load(0), ...op.i32Eqz,
+          ...op.if(EMPTY), ...this.failAt('R506', 'split needs a non-empty separator', pos), ...op.end,
+          ...op.localGet(by), ...op.call(this.splitFn())];
+      }
+      case 'join': return [...A('parts'), ...A('by'), ...op.call(this.joinFn())];
+      case 'contains': return [...A('text'), ...A('part'), ...op.i32(0), ...op.call(this.indexOfFn()), ...op.i32(0), ...op.i32GeS];
+      case 'starts_with': {
+        const [t, x] = [ctx.local(I32), ctx.local(I32)];
+        return [...A('text'), ...op.localSet(t), ...A('prefix'), ...op.localSet(x), ...op.localGet(t), ...op.i32(0), ...op.localGet(x), ...op.call(this.matchAtFn())];
+      }
+      case 'ends_with': {
+        const [t, x] = [ctx.local(I32), ctx.local(I32)];
+        return [...A('text'), ...op.localSet(t), ...A('suffix'), ...op.localSet(x),
+          ...op.localGet(t), ...op.localGet(t), ...op.i32Load(0), ...op.localGet(x), ...op.i32Load(0), ...op.i32Sub, ...op.localGet(x), ...op.call(this.matchAtFn())];
+      }
+      case 'lines': return [...A('text'), ...op.call(this.linesFn())];
+      case 'html_text': return [...A('value'), ...op.call(this.escapeFn())];
+      case 'html_join': return [...A('parts'), ...op.i32(this.str('')), ...op.call(this.joinFn())];
+      case 'html': case 'sql': {
+        // 型紙は書いたままの文字（E310 で確かめ済み）なので、穴の数はコンパイルのときにわかる
+        const mark = e.name === 'html' ? '{}' : '?';
+        const parts = arg('template').value.v.split(mark);
+        const vs = ctx.local(I32);
+        const check = [
+          ...A('values'), ...op.localTee(vs), ...op.i32Load(0), ...op.i32(parts.length - 1), ...op.i32Ne,
+          ...op.if(EMPTY), ...this.failAt('R510', `the template has ${parts.length - 1} hole(s) '${mark}' but a different number of values were given`, pos), ...op.end,
+        ];
+        if (e.name === 'sql') {
+          const p = ctx.local(I32);
+          return [...check, ...op.i32(8), ...op.call(this.h.alloc), ...op.localTee(p), ...op.i32(this.str(arg('template').value.v)), ...op.i32Store(0),
+            ...op.localGet(p), ...op.localGet(vs), ...op.i32Store(4), ...op.localGet(p)];
+        }
+        const out = [...check, ...op.i32(this.str('')), ...op.i32(this.str(parts[0])), ...op.call(this.h.concat)];
+        parts.slice(1).forEach((part, i) => out.push(
+          ...op.localGet(vs), ...op.i32Load(8 + 8 * i), ...op.call(this.h.concat), ...op.i32(this.str(part)), ...op.call(this.h.concat),
+        ));
+        return out;
+      }
+      default: throw new Unsupported(`the built-in function ${e.name}`, pos);
+    }
   }
 }
 

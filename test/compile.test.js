@@ -48,7 +48,7 @@ test('hello and gcd compile (the compiler is not silently skipping everything)',
 });
 
 test('unsupported features give E600 with a position and a fix', () => {
-  const b = buildSource('fn main(console: Console) -> Unit do print(to: console, value: html_text(value: "a")) end');
+  const b = buildSource('fn main(console: Console, folder: Folder) -> Unit do print(to: console, value: 1) end');
   assert.equal(b.ok, false);
   assert.equal(b.diagnostics[0].code, 'E600');
   assert.ok(b.diagnostics[0].line > 0 && b.diagnostics[0].fix.length > 10);
@@ -138,4 +138,32 @@ test('generated list expressions give the same result (200 programs)', () => {
     if (viaInterpreter(src).code) errors++;
   }
   assert.ok(errors > 5 && errors < 150, `the generated programs should include both errors and results (${errors} errors)`);
+});
+
+// 自動で作った文字の式を、両方で動かして比べる。種は固定
+function genStr(r, d) {
+  const pick = (xs) => xs[Math.floor(r() * xs.length)];
+  const atoms = ['""', '"a"', '"ab,c"', '",,"', '" x y "', '"あい,う"', '"a\\nb\\n"', '"\\n"', '"😀,😀"', '"a\\"b\\\\"', '"<&>"'];
+  if (d <= 0 || r() < 0.3) return pick(atoms);
+  switch (Math.floor(r() * 5)) {
+    case 0: return `(${genStr(r, d - 1)} ++ ${genStr(r, d - 1)})`;
+    case 1: return `join(parts: split(text: ${genStr(r, d - 1)}, by: ${pick(['","', '"a"', '"\\n"', '"😀"'])}), by: ${pick(['"-"', '""', '"あ"'])})`;
+    case 2: return `trim(text: ${genStr(r, d - 1)})`;
+    case 3: return `join(parts: reverse(list: chars(text: ${genStr(r, d - 1)})), by: "")`;
+    default: return `to_str(value: html_text(value: ${genStr(r, d - 1)}))`;
+  }
+}
+
+test('generated text expressions give the same result (200 programs)', () => {
+  const r = rng(20261121);
+  for (let i = 0; i < 200; i++) {
+    const s = genStr(r, 3);
+    const k = r();
+    const e = k < 0.3 ? s : k < 0.45 ? `split(text: ${s}, by: ",")` : k < 0.55 ? `lines(text: ${s})` : k < 0.65 ? `chars(text: ${s})`
+      : k < 0.75 ? `contains(text: ${s}, part: ${genStr(r, 1)})` : k < 0.85 ? `starts_with(text: ${s}, prefix: ${genStr(r, 1)})`
+        : k < 0.9 ? `ends_with(text: ${s}, suffix: ${genStr(r, 1)})` : `[${s}, ${genStr(r, 2)}]`;
+    const src = `fn main(console: Console) -> Unit do print(to: console, value: ${e}) end`;
+    if (analyze(src).diagnostics.length) continue;
+    assert.ok(same(src, e), `not compiled: ${e}\n${JSON.stringify(viaWasm(src).unsupported)}`);
+  }
 });
