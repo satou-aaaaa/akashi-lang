@@ -12,8 +12,32 @@ const NONE = { tag: 'None', fields: {} };
 const some = (value) => ({ tag: 'Some', fields: { value } });
 const err = (message) => ({ tag: 'Err', fields: { message } });
 
+// 辞書の鍵の順：コードポイント順（UTF-8 のバイト順と同じ。JS の < は UTF-16 の順なので使わない）
+export function cmpKey(a, b) {
+  const x = [...a];
+  const y = [...b];
+  for (let i = 0; i < x.length && i < y.length; i++) {
+    const d = x[i].codePointAt(0) - y[i].codePointAt(0);
+    if (d) return d < 0 ? -1 : 1;
+  }
+  return x.length - y.length < 0 ? -1 : x.length > y.length ? 1 : 0;
+}
+// 辞書の値は { dict: [[鍵, 値], ...] }（鍵の順に並べ、鍵は重ならない）。どこ（何番め）にあるか・入れる場所
+function findKey(d, key) {
+  let lo = 0;
+  let hi = d.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const c = cmpKey(d[mid][0], key);
+    if (c === 0) return { at: mid, found: true };
+    if (c < 0) lo = mid + 1; else hi = mid;
+  }
+  return { at: lo, found: false };
+}
+
 export function show(v, nested = false) {
   if (v === null) return '()';
+  if (v && v.dict) return `{${v.dict.map(([k, x]) => `${JSON.stringify(k)}: ${show(x, true)}`).join(', ')}}`;
   if (v && v.cap) return `<${v.cap}>`;
   if (v && v.tag !== undefined) {
     const fs = Object.entries(v.fields);
@@ -28,6 +52,7 @@ export function show(v, nested = false) {
 }
 
 function equal(a, b) {
+  if (a && b && a.dict && b.dict) return a.dict.length === b.dict.length && a.dict.every(([k, x], i) => k === b.dict[i][0] && equal(x, b.dict[i][1]));
   if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => equal(x, b[i]));
   if (a && b && a.tag !== undefined && b.tag !== undefined) return a.tag === b.tag && Object.keys(a.fields).every((k) => equal(a.fields[k], b.fields[k]));
   return a === b;
@@ -153,6 +178,34 @@ export class Machine {
       case 'map': return a.list.map((x) => this.apply(a.func, [x], pos));
       case 'filter': return a.list.filter((x) => this.apply(a.func, [x], pos) === true);
       case 'fold': return a.list.reduce((acc, x) => this.apply(a.func, [acc, x], pos), a.init);
+      case 'dict': {
+        if (a.keys.length !== a.values.length) this.fail('R506', `dict got ${a.keys.length} key(s) but ${a.values.length} value(s)`, pos, 'give exactly one value per key, in the same order');
+        const d = [];
+        a.keys.forEach((k, i) => {
+          const f = findKey(d, k);
+          if (f.found) this.fail('R506', `key ${JSON.stringify(k)} appears twice in dict`, pos, 'give each key once; to change a value later use dict_put(dict: ..., key: ..., value: ...)');
+          d.splice(f.at, 0, [k, a.values[i]]);
+        });
+        return { dict: d };
+      }
+      case 'dict_put': {
+        const d = [...a.dict.dict];
+        const f = findKey(d, a.key);
+        d.splice(f.at, f.found ? 1 : 0, [a.key, a.value]);
+        return { dict: d };
+      }
+      case 'dict_get': { const f = findKey(a.dict.dict, a.key); return f.found ? some(a.dict.dict[f.at][1]) : NONE; }
+      case 'dict_has': return findKey(a.dict.dict, a.key).found;
+      case 'dict_remove': {
+        const f = findKey(a.dict.dict, a.key);
+        if (!f.found) return a.dict;
+        const d = [...a.dict.dict];
+        d.splice(f.at, 1);
+        return { dict: d };
+      }
+      case 'dict_keys': return a.dict.dict.map(([k]) => k);
+      case 'dict_values': return a.dict.dict.map(([, x]) => x);
+      case 'dict_size': return a.dict.dict.length;
       default: throw new Error(`internal: unknown function ${name}`);
     }
   }

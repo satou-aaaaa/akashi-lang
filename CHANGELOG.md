@@ -3,6 +3,16 @@
 版の決め方：試作のあいだは 0.x。言語の決まりが変わる（前に通ったプログラムが通らなくなる）ときは、2つめの数を上げる。
 形は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) にならう。
 
+## 0.12.0 — 2026-11-19
+
+### 足した
+- 辞書 `Dict[T]`（鍵は Str だけ）と `dict`・`dict_put`・`dict_get`・`dict_has`・`dict_remove`・`dict_keys`・`dict_values`・`dict_size`。どれも新しい辞書を返し、元は変えない。鍵はいつもコードポイント順に並ぶので、表示・`dict_keys`・`==` は実行ごとに変わらない（Go の map のように回る順がぶれない）。`dict` で同じ鍵が2回・鍵と値の数が違うときは R506。
+- コンパイラも辞書を扱う（並べた組を二分探索）。差分テストに、自動で作った辞書の式 200 個を足した。
+- 自動の試し（fuzz）が Dict の引数も作る。
+
+### 変えた（前のプログラムが通らないことがある）
+- `Dict` は型の名前に、`dict`・`dict_put`・`dict_get`・`dict_has`・`dict_remove`・`dict_keys`・`dict_values`・`dict_size` は標準の関数になったので、同じ名前は使えない。
+
 ## 0.11.0 — 2026-11-19
 
 ### 足した

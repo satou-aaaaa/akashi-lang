@@ -2,7 +2,7 @@
 // ensures が破れる（R511）・落ちる（R512）ものを探す。example だけでは見落とす場合を拾う。
 // 種は固定（毎回同じ入力。結果がぶれない）。いちばん小さい反例を探して見せる。
 import { AkashiError, diag } from './errors.js';
-import { Machine, OutOfBudget, show } from './run.js';
+import { Machine, OutOfBudget, show, cmpKey } from './run.js';
 import { BUILTIN_TYPES } from './check.js';
 
 const TRIES = 200;
@@ -24,7 +24,7 @@ const EDGE_STRS = ['', 'a', ' ', 'ab', '<&>', '"\'', 'あ', '\n'];
 
 // 自分で作る型：case を1つ選んで欄を作る。深くなったら欄の無い case（無ければ打ち切り）
 class TooDeep extends Error {}
-const subst = (t, s) => (t.k === 'Param' ? s[t.name] : t.k === 'List' ? { k: 'List', of: subst(t.of, s) } : t.k === 'Data' ? { ...t, args: t.args.map((x) => subst(x, s)) } : t);
+const subst = (t, s) => (t.k === 'Param' ? s[t.name] : t.k === 'List' || t.k === 'Dict' ? { k: t.k, of: subst(t.of, s) } : t.k === 'Data' ? { ...t, args: t.args.map((x) => subst(x, s)) } : t);
 
 function gen(type, r, size, types, depth = 0) {
   switch (type.k) {
@@ -32,7 +32,7 @@ function gen(type, r, size, types, depth = 0) {
       const ty = types.get(type.name);
       const s = Object.fromEntries(ty.params.map((p, i) => [p, type.args[i]]));
       let vs = ty.variants;
-      if (depth > 3) { vs = vs.filter((v) => v.fields.every((f) => f.type.k !== 'Data' && f.type.k !== 'List')); if (!vs.length) throw new TooDeep(); }
+      if (depth > 3) { vs = vs.filter((v) => v.fields.every((f) => f.type.k !== 'Data' && f.type.k !== 'List' && f.type.k !== 'Dict')); if (!vs.length) throw new TooDeep(); }
       const v = vs[Math.floor(r() * vs.length)];
       return { tag: v.name, fields: Object.fromEntries(v.fields.map((f) => [f.name, gen(subst(f.type, s), r, size, types, depth + 1)])) };
     }
@@ -49,6 +49,12 @@ function gen(type, r, size, types, depth = 0) {
       const n = Math.floor(r() * 6);
       return Array.from({ length: n }, () => gen(type.of, r, size, types, depth + 1));
     }
+    case 'Dict': {
+      const n = Math.floor(r() * 4);
+      const m = new Map();
+      for (let i = 0; i < n; i++) m.set(gen({ k: 'Str' }, r, size, types, depth + 1), gen(type.of, r, size, types, depth + 1));
+      return { dict: [...m].sort((x, y) => cmpKey(x[0], y[0])) };
+    }
     default: return undefined;
   }
 }
@@ -56,7 +62,7 @@ function gen(type, r, size, types, depth = 0) {
 // 作れる型か（自分で作る型は欄が全部作れるとき。同じ型をたどり直したら作れるとみなす）
 function generatable(t, types, seen = new Set()) {
   if (['Int', 'Bool', 'Str'].includes(t.k)) return true;
-  if (t.k === 'List') return generatable(t.of, types, seen);
+  if (t.k === 'List' || t.k === 'Dict') return generatable(t.of, types, seen);
   if (t.k === 'Data') {
     const key = JSON.stringify(t);
     if (seen.has(key)) return true;
@@ -74,6 +80,7 @@ function* smaller(v) {
   if (typeof v === 'number' && v !== 0) { yield 0; yield Math.trunc(v / 2); yield v > 0 ? v - 1 : v + 1; }
   if (typeof v === 'string' && v.length) { yield ''; yield v.slice(1); yield v.slice(0, -1); }
   if (Array.isArray(v) && v.length) { yield []; yield v.slice(1); yield v.slice(0, -1); }
+  if (v && v.dict && v.dict.length) { yield { dict: [] }; yield { dict: v.dict.slice(1) }; yield { dict: v.dict.slice(0, -1) }; }
   if (v && v.tag !== undefined) {
     for (const [k, x] of Object.entries(v.fields)) for (const y of smaller(x)) yield { tag: v.tag, fields: { ...v.fields, [k]: y } };
   }

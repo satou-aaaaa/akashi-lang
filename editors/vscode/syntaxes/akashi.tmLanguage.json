@@ -42,7 +42,7 @@
     "type": {
       "patterns": [
         { "name": "support.type.capability.akashi", "match": "\\b(Console|Folder)\\b" },
-        { "name": "support.type.builtin.akashi", "match": "\\b(Int|Bool|Str|Unit|List|Option|Result|Html|Sql)\\b" },
+        { "name": "support.type.builtin.akashi", "match": "\\b(Int|Bool|Str|Unit|List|Dict|Option|Result|Html|Sql)\\b" },
         { "name": "entity.name.type.akashi", "match": "\\b[A-Z][A-Za-z0-9_]*\\b" }
       ]
     },

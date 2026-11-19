@@ -35,6 +35,7 @@ Python・JavaScript・Java・C/C++・Go・Rust などでよく問題になるこ
 | どこからでも外に触れる権利 | ほとんどの言語（どの関数もファイルや通信を使える） | 依存した部品が乗っ取られると、その部品も全部の権利を持つ。CWE Top 25 の「認可の抜け」「パスの乗っ取り」 [9][10] | 外に触る権利は**鍵（Console・Folder）を引数で渡したときだけ**。鍵は main だけが受け取り、作れない・しまえない（E300・E309）。ファイルは渡したフォルダの中だけ（R507） |
 | 浮動小数点の誤差 | ほぼ全部（`0.1 + 0.2 != 0.3`） | 2進の小数は 0.1 を正確に表せない [11] | 小数は**まだ無い**（E101）。お金などは「円」「銭」の整数で書く。入れるなら2進でなく10進の小数にする（下の「入れなかった」） |
 | 文字の長さの数え違い | JavaScript・Java（UTF-16 の単位で数える） | 絵文字などは `length` が 2 になる [12] | `str_len`・`chars`・`slice`・`code_of` は、どれも文字（コードポイント）で数える。バイトや UTF-16 の位置は表に出さないので、絵文字の途中で切ることが無い。範囲の外は黙って縮めずに R506 で止める |
+| 辞書の回る順のぶれ | Go（map）・Python 3.6 より前の dict | Go の仕様は「map を回る順は決めず、回すたびに同じとも限らない」とする [26]。出力やテストが実行ごとに変わる | `Dict` の鍵は Str だけ。いつも鍵の順（コードポイント順）に並ぶので、`dict_keys`・表示・`==` は毎回同じ。同じ鍵を2回渡す `dict` は黙って上書きせず R506 |
 | 演算の強さの思い込み | C・JavaScript・Python | `a and b or c` や `0 < x < 10` の読み違い | `and` と `or` を混ぜるときは括弧（E105）、比較はつなげない（E106） |
 | 名前の上書き・取り違え | JavaScript（`var`）・Python | 同じ名前を別の意味で使い直して取り違える | 名前は1回だけ（E203）。引数は名前つき・宣言の順（E206・E207） |
 
@@ -159,3 +160,4 @@ Python・JavaScript・Java・C/C++・Go・Rust などでよく問題になるこ
 23. Google Research, "Safe Coding: Rigorous Modular Reasoning about Software Safety". https://research.google/pubs/safe-coding-rigorous-modular-reasoning-about-software-safety-extended-version/
 24. Yi Wei, Carlo A. Furia, Bertrand Meyer ほか, "The Search for the Laws of Automatic Random Testing". https://arxiv.org/abs/1211.3257
 25. Diátaxis（Daniele Procida）. https://diataxis.fr/ ／ Canonical での採用：https://ubuntu.com/blog/diataxis-a-new-foundation-for-canonical-documentation
+26. The Go Programming Language Specification, "For statements with range clause". https://go.dev/ref/spec#For_range

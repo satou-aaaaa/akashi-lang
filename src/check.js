@@ -16,8 +16,10 @@ export const countHoles = (template, hole) => template.split(hole).length - 1;
 // 権利（ケーパビリティ）の型。値を作る方法は無く、main が受け取って引数で渡すだけ
 const CAPS = ['Console', 'Folder'];
 const isCap = (t) => CAPS.includes(prune(t).k);
-const hasCap = (t) => { t = prune(t); return isCap(t) || (t.k === 'List' && hasCap(t.of)) || (t.k === 'Data' && t.args.some(hasCap)); };
+const hasCap = (t) => { t = prune(t); return isCap(t) || ((t.k === 'List' || t.k === 'Dict') && hasCap(t.of)) || (t.k === 'Data' && t.args.some(hasCap)); };
 const List = (of) => ({ k: 'List', of });
+// 辞書。鍵は Str だけ（選び方を1つにする）。鍵の順（コードポイント順）に並ぶので、回す順はいつも同じ
+const Dict = (of) => ({ k: 'Dict', of });
 const Data = (name, args = []) => ({ k: 'Data', name, args });
 const Option = (of) => Data('Option', [of]);
 const Result = (of) => Data('Result', [of]);
@@ -39,7 +41,7 @@ export function prune(t) {
 function occurs(v, t) {
   t = prune(t);
   if (t === v) return true;
-  if (t.k === 'List') return occurs(v, t.of);
+  if (t.k === 'List' || t.k === 'Dict') return occurs(v, t.of);
   if (t.k === 'Fn') return t.params.some((p) => occurs(v, p)) || occurs(v, t.ret);
   if (t.k === 'Data') return t.args.some((x) => occurs(v, x));
   return false;
@@ -52,7 +54,7 @@ function unify(a, b) {
   if (a.k === 'Var') { if (a !== b) { if (occurs(a, b)) return false; a.ref = b; } return true; }
   if (b.k === 'Var') return unify(b, a);
   if (a.k !== b.k) return false;
-  if (a.k === 'List') return unify(a.of, b.of);
+  if (a.k === 'List' || a.k === 'Dict') return unify(a.of, b.of);
   if (a.k === 'Data') return a.name === b.name && a.args.every((x, i) => unify(x, b.args[i]));
   if (a.k === 'Fn') {
     if (a.params.length !== b.params.length) return false;
@@ -64,6 +66,7 @@ function unify(a, b) {
 export function typeStr(t) {
   t = prune(t);
   if (t.k === 'List') return `List[${typeStr(t.of)}]`;
+  if (t.k === 'Dict') return `Dict[${typeStr(t.of)}]`;
   if (t.k === 'Fn') return `fn(${t.params.map(typeStr).join(', ')}) -> ${typeStr(t.ret)}`;
   if (t.k === 'Data') return t.args.length ? `${t.name}[${t.args.map(typeStr).join(', ')}]` : t.name;
   if (t.k === 'Var') return 'T';
@@ -114,10 +117,20 @@ export const BUILTINS = {
   map: () => { const a = fresh(); const b = fresh(); return { params: [['list', List(a)], ['func', Fn([a], b)]], ret: List(b) }; },
   filter: () => { const a = fresh(); return { params: [['list', List(a)], ['func', Fn([a], BOOL)]], ret: List(a) }; },
   fold: () => { const a = fresh(); const b = fresh(); return { params: [['list', List(a)], ['init', b], ['func', Fn([b, a], b)]], ret: b }; },
+  // 辞書（v0.12）。どれも新しい辞書を返し、元は変えない。鍵が重なる dict は R506 で止める（黙って上書きしない）
+  dict: () => { const a = fresh(); return { params: [['keys', List(STR)], ['values', List(a)]], ret: Dict(a) }; },
+  dict_put: () => { const a = fresh(); return { params: [['dict', Dict(a)], ['key', STR], ['value', a]], ret: Dict(a) }; },
+  dict_get: () => { const a = fresh(); return { params: [['dict', Dict(a)], ['key', STR]], ret: Option(a) }; },
+  dict_has: () => ({ params: [['dict', Dict(fresh())], ['key', STR]], ret: BOOL }),
+  dict_remove: () => { const a = fresh(); return { params: [['dict', Dict(a)], ['key', STR]], ret: Dict(a) }; },
+  dict_keys: () => ({ params: [['dict', Dict(fresh())]], ret: List(STR) }),
+  dict_values: () => { const a = fresh(); return { params: [['dict', Dict(a)]], ret: List(a) }; },
+  dict_size: () => ({ params: [['dict', Dict(fresh())]], ret: INT }),
 };
 
 export function fromAst(t, subst = {}) {
   if (t.k === 'List') return List(fromAst(t.of, subst));
+  if (t.k === 'Dict') return Dict(fromAst(t.of, subst));
   if (t.k === 'Data') return Data(t.name, t.args.map((x) => fromAst(x, subst)));
   if (t.k === 'Param') return subst[t.name];
   return { k: t.k };
@@ -135,7 +148,7 @@ export function check(program) {
   const types = new Map();
   const variants = new Map();
   for (const ty of [...BUILTIN_TYPES, ...(program.types ?? []).map((x) => ({ ...x, params: [], user: true }))]) {
-    if (types.has(ty.name) || (ty.user && ['Int', 'Bool', 'Str', 'Unit', 'List', 'Html', 'Sql', 'Console', 'Folder'].includes(ty.name))) {
+    if (types.has(ty.name) || (ty.user && ['Int', 'Bool', 'Str', 'Unit', 'List', 'Dict', 'Html', 'Sql', 'Console', 'Folder'].includes(ty.name))) {
       err('E203', `type '${ty.name}' is already defined`, ty.pos, 'give the type a different name');
       continue;
     }
