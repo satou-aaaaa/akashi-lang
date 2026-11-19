@@ -76,14 +76,15 @@ class Unsupported extends Error {
 
 const LIST_BUILTINS = ['len', 'get', 'at', 'range', 'append', 'map', 'filter', 'fold', 'find', 'any', 'all', 'reverse', 'take', 'drop', 'sort', 'sum', 'max', 'min'];
 const TEXT_BUILTINS = ['chars', 'split', 'join', 'contains', 'starts_with', 'ends_with', 'lines', 'html', 'html_text', 'html_join', 'sql'];
+const DICT_BUILTINS = ['dict', 'dict_put', 'dict_get', 'dict_has', 'dict_remove', 'dict_keys', 'dict_values', 'dict_size'];
 const CAPS = ['Console', 'Folder']; // 鍵。実行時には何も渡さない（Folder は WASI の fd 3）
-const SUPPORTED_BUILTINS = ['print', 'to_str', 'str_len', 'parse_int', 'trim', 'read_text', 'slice', 'code_of', 'char_of', ...LIST_BUILTINS, ...TEXT_BUILTINS];
+const SUPPORTED_BUILTINS = ['print', 'to_str', 'str_len', 'parse_int', 'trim', 'read_text', 'slice', 'code_of', 'char_of', ...LIST_BUILTINS, ...TEXT_BUILTINS, ...DICT_BUILTINS];
 
 function valType(t) {
   t = prune(t);
   switch (t.k) {
     case 'Int': return I64;
-    case 'Bool': case 'Str': case 'List': case 'Data': case 'Html': case 'Sql': return I32;
+    case 'Bool': case 'Str': case 'List': case 'Dict': case 'Data': case 'Html': case 'Sql': return I32;
     case 'Unit': return null;
     case 'Var': return null; // まだ決まらない型（空のリストの要素など）。値は1つも作られないので、何も置かない
     default: return undefined;
@@ -544,6 +545,7 @@ class Compiler {
     if (!SUPPORTED_BUILTINS.includes(e.name)) throw new Unsupported(`the built-in function ${e.name}`, e.pos);
     if (LIST_BUILTINS.includes(e.name)) return this.listBuiltin(e, A, arg, scope, ctx);
     if (TEXT_BUILTINS.includes(e.name)) return this.textBuiltin(e, A, arg, ctx);
+    if (DICT_BUILTINS.includes(e.name)) return this.dictBuiltin(e, A, arg, ctx);
     switch (e.name) {
       case 'str_len': return [...A('text'), ...op.call(this.h.strlen)];
       case 'trim': return [...A('text'), ...op.call(this.trimFn())];
@@ -668,6 +670,7 @@ class Compiler {
       case 'Bool': return [...code, ...op.if(I32), ...op.i32(this.str('true')), ...op.else, ...op.i32(this.str('false')), ...op.end];
       case 'Unit': case 'Var': return [...code, ...op.i32(this.str('()'))];
       case 'List': return [...code, ...op.call(this.showListFn(t, pos))];
+      case 'Dict': return [...code, ...op.call(this.showDictFn(t, pos))];
       case 'Data': return [...code, ...op.call(this.showDataFn(t, pos))];
       default: throw new Unsupported(`showing values of type ${typeStr(t)}`, pos);
     }
@@ -758,6 +761,7 @@ class Compiler {
       case 'Html': case 'Sql': return [...a, ...b, ...op.i32Eq]; // インタプリタと同じく、同じ値（作ったもの）どうしだけが等しい
       case 'Unit': case 'Var': return [...a, ...b, ...op.i32(1)];
       case 'List': return [...a, ...b, ...op.call(this.eqListFn(t, pos))];
+      case 'Dict': return [...a, ...b, ...op.call(this.eqDictFn(t, pos))];
       case 'Data': return [...a, ...b, ...op.call(this.eqDataFn(t, pos))];
       default: throw new Unsupported(`comparing values of type ${typeStr(t)}`, pos);
     }
@@ -939,6 +943,199 @@ class Compiler {
           ...forEach(i, n, [...item(), ...op.localTee(x), ...op.localGet(acc), ...better, ...op.if(EMPTY), ...op.localGet(x), ...op.localSet(acc), ...op.end]),
           ...this.mkData(optT(), 'Some', [op.localGet(acc)], ctx, pos),
           ...op.end,
+        ];
+      }
+      default: throw new Unsupported(`the built-in function ${e.name}`, pos);
+    }
+  }
+
+  // ---- 辞書 ----
+  // 配置：[数 u32][pad][鍵 Str の場所 8 バイト][値 8 バイト]... 鍵のバイト順（= コードポイント順）に並べ、鍵は重ならない。
+  // 値はどの型でも 8 バイトの欄なので、入れる・写すのは型によらない（i64 のまま運ぶ）。表示と == だけ型ごとに作る
+  showDictFn(t, pos) {
+    return this.gen(`show ${typeStr(t)}`, [I32], [I32], (local) => {
+      const [n, i, acc] = [local(I32), local(I32), local(I32)];
+      const cat = (code) => [...op.localGet(acc), ...code, ...op.call(this.h.concat), ...op.localSet(acc)];
+      return [
+        ...op.i32(this.str('{')), ...op.localSet(acc), ...op.localGet(0), ...op.i32Load(0), ...op.localSet(n),
+        ...forEach(i, n, [
+          ...op.localGet(i), ...op.if(EMPTY), ...cat(op.i32(this.str(', '))), ...op.end,
+          ...cat([...entryAddr(0, i), ...op.i32Load(8), ...op.call(this.quoteFn())]),
+          ...cat(op.i32(this.str(': '))),
+          ...cat(this.showCode(t.of, this.loadAt(t.of, entryAddr(0, i), 16, pos), true, pos)),
+        ]),
+        ...cat(op.i32(this.str('}'))), ...op.localGet(acc),
+      ];
+    });
+  }
+
+  eqDictFn(t, pos) {
+    return this.gen(`eq ${typeStr(t)}`, [I32, I32], [I32], (local) => {
+      const [n, i] = [local(I32), local(I32)];
+      const no = [...op.i32Eqz, ...op.if(EMPTY), ...op.i32(0), ...op.return, ...op.end];
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localTee(n), ...op.localGet(1), ...op.i32Load(0), ...op.i32Ne, ...op.if(EMPTY), ...op.i32(0), ...op.return, ...op.end,
+        ...forEach(i, n, [
+          ...entryAddr(0, i), ...op.i32Load(8), ...entryAddr(1, i), ...op.i32Load(8), ...op.call(this.h.streq), ...no,
+          ...this.eqCode(t.of, this.loadAt(t.of, entryAddr(0, i), 16, pos), this.loadAt(t.of, entryAddr(1, i), 16, pos), pos), ...no,
+        ]),
+        ...op.i32(1),
+      ];
+    });
+  }
+
+  // 文字のバイト順の比べ：a < b なら -1、同じなら 0、a > b なら 1
+  strCmpFn() {
+    return this.gen('str cmp', [I32, I32], [I32], (local) => {
+      const [la, lb, m, i, x, y] = [local(I32), local(I32), local(I32), local(I32), local(I32), local(I32)];
+      return [
+        ...op.localGet(0), ...op.i32Load(0), ...op.localSet(la), ...op.localGet(1), ...op.i32Load(0), ...op.localSet(lb),
+        ...op.localGet(la), ...op.localGet(lb), ...op.localGet(la), ...op.localGet(lb), ...op.i32LtU, ...op.select, ...op.localSet(m),
+        ...forEach(i, m, [
+          ...op.localGet(0), ...op.localGet(i), ...op.i32Add, ...op.i32Load8u(4), ...op.localTee(x),
+          ...op.localGet(1), ...op.localGet(i), ...op.i32Add, ...op.i32Load8u(4), ...op.localTee(y), ...op.i32Ne,
+          ...op.if(EMPTY), ...op.i32(-1), ...op.i32(1), ...op.localGet(x), ...op.localGet(y), ...op.i32LtU, ...op.select, ...op.return, ...op.end,
+        ]),
+        ...op.localGet(la), ...op.localGet(lb), ...op.i32LtU, ...op.if(I32), ...op.i32(-1), ...op.else, ...op.localGet(la), ...op.localGet(lb), ...op.i32GtU, ...op.end,
+      ];
+    });
+  }
+
+  // 鍵を探す（二分探索）。あればその番号、無ければ -(入れる場所) - 1
+  dictFindFn() {
+    return this.gen('dict find', [I32, I32], [I32], (local) => {
+      const [lo, hi, mid, c] = [local(I32), local(I32), local(I32), local(I32)];
+      return [
+        ...op.i32(0), ...op.localSet(lo), ...op.localGet(0), ...op.i32Load(0), ...op.localSet(hi),
+        ...op.block(EMPTY), ...op.loop(EMPTY),
+        ...op.localGet(lo), ...op.localGet(hi), ...op.i32GeU, ...op.brIf(1),
+        ...op.localGet(lo), ...op.localGet(hi), ...op.i32Add, ...op.i32(1), ...op.i32ShrU, ...op.localSet(mid),
+        ...entryAddr(0, mid), ...op.i32Load(8), ...op.localGet(1), ...op.call(this.strCmpFn()), ...op.localTee(c), ...op.i32Eqz,
+        ...op.if(EMPTY), ...op.localGet(mid), ...op.return, ...op.end,
+        ...op.localGet(c), ...op.i32(0), ...op.i32LtS,
+        ...op.if(EMPTY), ...op.localGet(mid), ...op.i32(1), ...op.i32Add, ...op.localSet(lo), ...op.else, ...op.localGet(mid), ...op.localSet(hi), ...op.end,
+        ...op.br(0), ...op.end, ...op.end,
+        ...op.i32(-1), ...op.localGet(lo), ...op.i32Sub,
+      ];
+    });
+  }
+
+  // 新しい辞書（数 n）を作り、その場所を局所変数 p に入れる
+  newDict(n, p) {
+    return [...op.localGet(n), ...op.i32(16), ...op.i32Mul, ...op.i32(8), ...op.i32Add, ...op.call(this.h.alloc), ...op.localTee(p), ...op.localGet(n), ...op.i32Store(0)];
+  }
+
+  // 組を写す（dst の dstAt 番めへ、src の srcAt 番めから cnt 組）
+  copyEntries(dst, dstAt, src, srcAt, cnt) {
+    return [
+      ...op.localGet(dst), ...op.i32(8), ...op.i32Add, ...dstAt, ...op.i32(16), ...op.i32Mul, ...op.i32Add,
+      ...op.localGet(src), ...op.i32(8), ...op.i32Add, ...srcAt, ...op.i32(16), ...op.i32Mul, ...op.i32Add,
+      ...cnt, ...op.i32(16), ...op.i32Mul, ...op.memoryCopy,
+    ];
+  }
+
+  // put(d, key, 値の 8 バイト) -> 新しい辞書
+  dictPutFn() {
+    return this.gen('dict put', [I32, I32, I64], [I32], (local) => {
+      const [f, n, m, p, at] = [local(I32), local(I32), local(I32), local(I32), local(I32)];
+      const L = (x) => op.localGet(x);
+      return [
+        ...L(0), ...L(1), ...op.call(this.dictFindFn()), ...op.localSet(f), ...L(0), ...op.i32Load(0), ...op.localSet(n),
+        ...L(f), ...op.i32(0), ...op.i32GeS,
+        ...op.if(EMPTY),
+        ...this.newDict(n, p), ...this.copyEntries(p, op.i32(0), 0, op.i32(0), L(n)), ...L(f), ...op.localSet(at),
+        ...op.else,
+        ...op.i32(-1), ...L(f), ...op.i32Sub, ...op.localSet(at), ...L(n), ...op.i32(1), ...op.i32Add, ...op.localSet(m),
+        ...this.newDict(m, p),
+        ...this.copyEntries(p, op.i32(0), 0, op.i32(0), L(at)),
+        ...this.copyEntries(p, [...L(at), ...op.i32(1), ...op.i32Add], 0, L(at), [...L(n), ...L(at), ...op.i32Sub]),
+        ...op.end,
+        ...entryAddr(p, at), ...L(1), ...op.i32Store(8), ...entryAddr(p, at), ...L(2), ...op.i64Store(16),
+        ...L(p),
+      ];
+    });
+  }
+
+  dictRemoveFn() {
+    return this.gen('dict remove', [I32, I32], [I32], (local) => {
+      const [f, n, m, p] = [local(I32), local(I32), local(I32), local(I32)];
+      const L = (x) => op.localGet(x);
+      return [
+        ...L(0), ...L(1), ...op.call(this.dictFindFn()), ...op.localTee(f), ...op.i32(0), ...op.i32LtS, ...op.if(EMPTY), ...L(0), ...op.return, ...op.end,
+        ...L(0), ...op.i32Load(0), ...op.localTee(n), ...op.i32(1), ...op.i32Sub, ...op.localSet(m),
+        ...this.newDict(m, p),
+        ...this.copyEntries(p, op.i32(0), 0, op.i32(0), L(f)),
+        ...this.copyEntries(p, L(f), 0, [...L(f), ...op.i32(1), ...op.i32Add], [...L(m), ...L(f), ...op.i32Sub]),
+        ...L(p),
+      ];
+    });
+  }
+
+  // dict(keys, values)。数が合わなければ -1、鍵が重なれば 0
+  dictOfFn() {
+    return this.gen('dict of', [I32, I32], [I32], (local) => {
+      const [n, i, c, p, f, at, k] = [local(I32), local(I32), local(I32), local(I32), local(I32), local(I32), local(I32)];
+      const L = (x) => op.localGet(x);
+      return [
+        ...L(0), ...op.i32Load(0), ...op.localTee(n), ...L(1), ...op.i32Load(0), ...op.i32Ne, ...op.if(EMPTY), ...op.i32(-1), ...op.return, ...op.end,
+        // n 組ぶんの場所を取り、数は 0 から数える
+        ...this.newDict(n, p), ...op.localGet(p), ...op.i32(0), ...op.i32Store(0), ...op.i32(0), ...op.localSet(c),
+        ...forEach(i, n, [
+          ...elemAddr(0, i), ...op.i32Load(8), ...op.localSet(k),
+          ...L(p), ...L(k), ...op.call(this.dictFindFn()), ...op.localTee(f), ...op.i32(0), ...op.i32GeS, ...op.if(EMPTY), ...op.i32(0), ...op.return, ...op.end,
+          ...op.i32(-1), ...L(f), ...op.i32Sub, ...op.localSet(at),
+          // 後ろを1つずらして場所を空ける（memory.copy は重なってもよい）
+          ...this.copyEntries(p, [...L(at), ...op.i32(1), ...op.i32Add], p, L(at), [...L(c), ...L(at), ...op.i32Sub]),
+          ...entryAddr(p, at), ...L(k), ...op.i32Store(8), ...entryAddr(p, at), ...elemAddr(1, i), ...op.i64Load(8), ...op.i64Store(16),
+          ...L(c), ...op.i32(1), ...op.i32Add, ...op.localSet(c), ...L(p), ...L(c), ...op.i32Store(0),
+        ]),
+        ...L(p),
+      ];
+    });
+  }
+
+  // 値を 8 バイトの i64 にする（i32 の値は下の 4 バイトに。読むときは型どおり i32 で読む）
+  bits(t, code, pos) {
+    const s = this.slot(t, pos);
+    if (s === null) return [...code, ...op.i64(0)];
+    return s === I64 ? code : [...code, ...op.i64ExtendI32U];
+  }
+
+  dictBuiltin(e, A, arg, ctx) {
+    const pos = e.pos;
+    const dt = arg('dict') ? prune(arg('dict').value.ty) : null;
+    const [d, n, i, p, f] = [ctx.local(I32), ctx.local(I32), ctx.local(I32), ctx.local(I32), ctx.local(I32)];
+    switch (e.name) {
+      case 'dict': {
+        return [
+          ...A('keys'), ...A('values'), ...op.call(this.dictOfFn()), ...op.localTee(p), ...op.i32(-1), ...op.i32Eq,
+          ...op.if(EMPTY), ...this.failAt('R506', 'dict got a different number of keys and values', pos), ...op.end,
+          ...op.localGet(p), ...op.i32Eqz, ...op.if(EMPTY), ...this.failAt('R506', 'a key appears twice in dict', pos), ...op.end,
+          ...op.localGet(p),
+        ];
+      }
+      case 'dict_put': return [...A('dict'), ...A('key'), ...this.bits(dt.of, A('value'), pos), ...op.call(this.dictPutFn())];
+      case 'dict_remove': return [...A('dict'), ...A('key'), ...op.call(this.dictRemoveFn())];
+      case 'dict_has': return [...A('dict'), ...A('key'), ...op.call(this.dictFindFn()), ...op.i32(0), ...op.i32GeS];
+      case 'dict_size': return [...A('dict'), ...op.i32Load(0), ...op.i64ExtendI32U];
+      case 'dict_get': {
+        const ot = prune(e.ty);
+        const some = this.variantOf.get('Some').index;
+        return [
+          ...A('dict'), ...op.localTee(d), ...A('key'), ...op.call(this.dictFindFn()), ...op.localTee(f), ...op.i32(0), ...op.i32LtS,
+          ...op.if(I32), ...this.mkData(ot, 'None', [], ctx, pos),
+          ...op.else,
+          ...op.i32(16), ...op.call(this.h.alloc), ...op.localTee(p), ...op.i32(some), ...op.i32Store(0),
+          ...op.localGet(p), ...entryAddr(d, f), ...op.i64Load(16), ...op.i64Store(8), ...op.localGet(p),
+          ...op.end,
+        ];
+      }
+      case 'dict_keys': case 'dict_values': {
+        const off = e.name === 'dict_keys' ? 8 : 16;
+        return [
+          ...A('dict'), ...op.localTee(d), ...op.i32Load(0), ...op.localSet(n), ...this.newList(n, p),
+          ...forEach(i, n, [...elemAddr(p, i), ...entryAddr(d, i), ...op.i64Load(off), ...op.i64Store(8)]),
+          ...op.localGet(p),
         ];
       }
       default: throw new Unsupported(`the built-in function ${e.name}`, pos);
@@ -1503,6 +1700,11 @@ class Compiler {
 }
 
 // リスト（局所変数 list）の i 番目の要素の場所から 8 を引いたもの（load・store の off に 8 を足して使う）
+// 辞書の i 番めの組の場所から 8 を引いたところ（鍵は +8、値は +16 で読む）
+function entryAddr(d, i) {
+  return [...op.localGet(d), ...op.localGet(i), ...op.i32(16), ...op.i32Mul, ...op.i32Add];
+}
+
 function elemAddr(list, i) {
   return [...op.localGet(list), ...op.localGet(i), ...op.i32(8), ...op.i32Mul, ...op.i32Add];
 }

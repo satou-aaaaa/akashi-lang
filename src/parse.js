@@ -14,7 +14,7 @@ export const CAPABILITY_TYPES = ['Console', 'Folder'];
 export const SAFE_TYPES = ['Html', 'Sql'];
 // Option・Result は組み込みの「自分で作る型」。null と、見落とされる例外の代わり（docs/PROBLEMS.md）
 export const BUILTIN_DATA = ['Option', 'Result'];
-export const TYPE_NAMES = ['Int', 'Bool', 'Str', 'Unit', 'List', ...BUILTIN_DATA, ...SAFE_TYPES, ...CAPABILITY_TYPES];
+export const TYPE_NAMES = ['Int', 'Bool', 'Str', 'Unit', 'List', 'Dict', ...BUILTIN_DATA, ...SAFE_TYPES, ...CAPABILITY_TYPES];
 const isUpper = (w) => /^[A-Z]/.test(w);
 
 export function lex(src) {
@@ -239,6 +239,12 @@ class Parser {
       const of = this.type();
       this.expectOp(']', 'close the item type: List[Int]');
       return { k: 'List', of };
+    }
+    if (tok.v === 'Dict') {
+      this.expectOp('[', 'write the value type: Dict[Int] (keys are always Str)');
+      const of = this.type();
+      this.expectOp(']', 'close the value type: Dict[Int]');
+      return { k: 'Dict', of };
     }
     return { k: tok.v };
   }

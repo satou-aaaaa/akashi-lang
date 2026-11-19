@@ -59,7 +59,7 @@ sql(template: "SELECT id FROM users WHERE name = ?", values: [name])  # -> Sql
 
 ## Types
 
-`Int` (whole numbers only, overflow is an error), `Bool`, `Str`, `Unit` (written `()`), `List[T]`, `Option[T]`, `Result[T]`, `Html`, `Sql`, the capabilities `Console`, `Folder`, and your own types.
+`Int` (whole numbers only, overflow is an error), `Bool`, `Str`, `Unit` (written `()`), `List[T]`, `Dict[T]` (keys are always Str, kept in code point order), `Option[T]`, `Result[T]`, `Html`, `Sql`, the capabilities `Console`, `Folder`, and your own types.
 There are no decimals and no null.
 
 ## Your own types and match
@@ -173,6 +173,13 @@ end
 | `split(text: s, by: sep)` | List[Str] (sep must not be "") |
 | `join(parts: xs, by: sep)` | Str |
 | `contains(text: s, part: p)` / `starts_with(text: s, prefix: p)` / `ends_with(text: s, suffix: p)` | Bool |
+| `dict(keys: ks, values: vs)` | Dict[T]; R506 if the counts differ or a key appears twice |
+| `dict_put(dict: d, key: k, value: v)` | Dict[T], a new dictionary with k set to v |
+| `dict_get(dict: d, key: k)` | Option[T]; `None` if k is missing |
+| `dict_has(dict: d, key: k)` | Bool |
+| `dict_remove(dict: d, key: k)` | Dict[T] without k (unchanged if missing) |
+| `dict_keys(dict: d)` / `dict_values(dict: d)` | List[Str] / List[T], in key order |
+| `dict_size(dict: d)` | Int
 | `trim(text: s)` | Str without spaces and line ends around it |
 | `map(list: xs, func: f)` | f: fn(T) -> U, gives List[U] |
 | `filter(list: xs, func: f)` | f: fn(T) -> Bool |

@@ -55,6 +55,7 @@ end
 | `Str` | 文字列 | `"hi\n"`（使える `\` は `\n \t \" \\`） |
 | `Unit` | 値が無いこと | `()` |
 | `List[T]` | 同じ型の並び | `[1, 2, 3]`、`[]` |
+| `Dict[T]` | 名前（Str）→ 値 の辞書。鍵の順に並ぶ | `dict(keys: ["a"], values: [1])` |
 | `Option[T]` | 無いかもしれない値 | `Some(value: x)`、`None` |
 | `Result[T]` | 失敗するかもしれない結果 | `Ok(value: x)`、`Err(message: "理由")` |
 | `Html` | 組み立て済みの HTML | `html(...)`・`html_text(...)`・`html_join(...)` だけで作る |
@@ -198,6 +199,13 @@ end
 | `contains(text: s, part: p)`・`starts_with(text: s, prefix: p)`・`ends_with(text: s, suffix: p)` | Bool |
 | `trim(text: s)` | Str。前後の空白と改行を取る |
 | `html`・`html_text`・`html_join`・`sql` | 上の「HTML と SQL」 |
+| `dict(keys: ks, values: vs)` | Dict[T]。ks と vs を順に組にする。数が違う・同じ鍵が2回あると R506 |
+| `dict_put(dict: d, key: k, value: v)` | Dict[T]。k の値を v にした新しい辞書（元は変わらない） |
+| `dict_get(dict: d, key: k)` | Option[T]。無ければ None |
+| `dict_has(dict: d, key: k)` | Bool |
+| `dict_remove(dict: d, key: k)` | Dict[T]。k を除いた新しい辞書（無ければそのまま） |
+| `dict_keys(dict: d)`・`dict_values(dict: d)` | List[Str]・List[T]。鍵の順（コードポイント順） |
+| `dict_size(dict: d)` | Int。組の数 |
 
 ## 検査と実行
 

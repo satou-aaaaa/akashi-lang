@@ -172,6 +172,40 @@ test('generated text expressions give the same result (200 programs)', () => {
   }
 });
 
+// 自動で作った辞書の式を、両方で動かして比べる（鍵の順・重なり・数の食い違い・全角や絵文字の鍵）。種は固定
+function genDict(r, d) {
+  const pick = (xs) => xs[Math.floor(r() * xs.length)];
+  const keys = ['""', '"a"', '"b"', '"ab"', '"B"', '"é"', '"😀"', '"あ"', '"a b"'];
+  if (d <= 0 || r() < 0.25) {
+    const n = Math.floor(r() * 4);
+    const ks = Array.from({ length: n }, () => pick(keys));
+    const vs = Array.from({ length: r() < 0.1 ? n + 1 : n }, () => genInt(r, 1));
+    return `dict(keys: [${ks.join(', ')}], values: [${vs.join(', ')}])`;
+  }
+  switch (Math.floor(r() * 3)) {
+    case 0: return `dict_put(dict: ${genDict(r, d - 1)}, key: ${pick(keys)}, value: ${genInt(r, 1)})`;
+    case 1: return `dict_remove(dict: ${genDict(r, d - 1)}, key: ${pick(keys)})`;
+    default: return `dict_put(dict: ${genDict(r, d - 1)}, key: ${pick(keys)}, value: dict_size(dict: ${genDict(r, d - 1)}))`;
+  }
+}
+
+test('generated dictionary expressions give the same result (200 programs)', () => {
+  const r = rng(20261122);
+  let errors = 0;
+  for (let i = 0; i < 200; i++) {
+    const m = genDict(r, 3);
+    const k = r();
+    const key = ['"a"', '"b"', '"😀"', '"zz"'][Math.floor(r() * 4)];
+    const e = k < 0.4 ? m : k < 0.5 ? `dict_keys(dict: ${m})` : k < 0.6 ? `dict_values(dict: ${m})` : k < 0.7 ? `dict_get(dict: ${m}, key: ${key})`
+      : k < 0.8 ? `dict_has(dict: ${m}, key: ${key})` : k < 0.9 ? `${m} == ${genDict(r, 2)}` : `[${m}, ${genDict(r, 1)}]`;
+    const src = `fn main(console: Console) -> Unit do print(to: console, value: ${e}) end`;
+    if (analyze(src).diagnostics.length) continue;
+    assert.ok(same(src, e), `not compiled: ${e}\n${JSON.stringify(viaWasm(src).unsupported)}`);
+    if (viaInterpreter(src).code) errors++;
+  }
+  assert.ok(errors > 5 && errors < 150, `the generated programs should include both errors and results (${errors} errors)`);
+});
+
 // ファイルを読む（段階3）：渡したフォルダの中だけ。外へのリンク・.. ・渡していないときは止まる。読めないものは Err
 test('reading files agrees with the interpreter, including links out, folders, bad UTF-8 and a BOM', () => {
   const root = mkdtempSync(join(tmpdir(), 'akashi-'));

@@ -31,13 +31,14 @@ wasmtime --dir examples/files::. r.wasm                # フォルダは最初�
 
 | 扱える | まだ扱えない（E600） |
 | --- | --- |
-| Int・Bool・Str・Unit・List・Option・Result・自分で作る型・Html・Sql | 関数を値として let に入れる・引数で受け取る・表示する |
+| Int・Bool・Str・Unit・List・Dict・Option・Result・自分で作る型・Html・Sql | 関数を値として let に入れる・引数で受け取る・表示する |
 | 関数・再帰・let・if・when・match | |
 | Folder と read_text（渡したフォルダの中だけ。段階3） | |
 | requires・ensures（毎回確かめる） | |
 | print・to_str・str_len・parse_int・trim・chars・split・join・contains・starts_with・ends_with・lines・slice・code_of・char_of | |
 | html・html_text・html_join・sql（穴の数は R510 で確かめる） | |
 | len・get・at・range・append・map・filter・fold・find・any・all・reverse・take・drop・sort・sum・max・min | |
+| dict・dict_put・dict_get・dict_has・dict_remove・dict_keys・dict_values・dict_size | |
 | `+ - * / %`・比較（`==` は中身まで）・`and or not`・`++`（Str・List） | |
 
 `func:` に渡せるのは、いちばん外に書いた関数の名前です（`map(list: xs, func: double)`）。
@@ -51,6 +52,7 @@ wasmtime --dir examples/files::. r.wasm                # フォルダは最初�
 
 - **値の表し方**（Html は Str と同じ形、Sql は「型紙の文字＋値のリスト」）：Int は 64 ビット整数（i64）、Bool は 0/1（i32）、Str はメモリ上の「長さ（4バイト）＋UTF-8 のバイト」の先頭の場所（i32）、Unit は値なし。
   - List は「長さ（4バイト）＋すき間（4バイト）＋要素を 8 バイトずつ」の先頭の場所（i32）。要素の型によらず 8 バイトにそろえるので、どの型のリストも同じ形で扱えます。
+  - Dict は「組の数（4バイト）＋すき間（4バイト）＋組を 16 バイトずつ（鍵の Str の場所 8 バイト・値 8 バイト）」の先頭の場所（i32）。鍵のバイト順（UTF-8 のバイト順はコードポイント順と同じ）に並べておき、二分探索で探します。値の欄は型によらず 8 バイトなので、入れる・写すのは型を見ずにできます。
   - 型の値（Option・Result・自分で作る型）は「case の番号（4バイト）＋すき間（4バイト）＋欄を 8 バイトずつ」の先頭の場所（i32）。欄の無い case（`None`・`Dot` など）は、データの節に1つだけ置いて使い回します。
   - 表示（print・to_str）と比べる（`==`）は、型ごとに WebAssembly の関数を作ります（使った型の分だけ）。
 - **メモリは増える一方**：今は、使い終わった値を片付けません（ごみ集めをしない）。プログラムは短く終わる前提です。
@@ -95,7 +97,7 @@ wasmtime --dir examples/files::. r.wasm                # フォルダは最初�
 | 1（済み） | Int・Bool・Str・関数・if・約束を、WebAssembly に0から書き出す。インタプリタとの差分テスト | `examples/` のうち、リストを使わないものが全部同じ答え |
 | 2（済み） | List・Option・Result・自分で作る型・match・リストの関数・文字の関数・Html/Sql。値は線形メモリに置く | `examples/` の全部（ファイル以外）が同じ答え |
 | 3（済み） | Folder（WASI の `path_open`。渡したフォルダだけを開ける）。自分の受け皿と、もう1つの WASI の実装（Node の node:wasi）の両方で確かめる。末尾呼び出し（`return_call`）は見送った（インタプリタの再帰の上限 500 と答えをそろえるため。長いくり返しは range と fold で書く） | `read_file.ak` が WASI の実行環境で、渡したフォルダだけを読んで動く |
-| 4（途中） | コンパイラを書くのに要る道具を言語に足す：文字を1文字ずつ見る・切り出す（chars・slice・code_of・char_of。済み）、バイトの並び（Bytes）、辞書（名前→値）、ファイルに書く鍵、複数のファイル（部品） | 字句解析を Akashi で書ける |
+| 4（途中） | コンパイラを書くのに要る道具を言語に足す：文字を1文字ずつ見る・切り出す（chars・slice・code_of・char_of。済み）、辞書（Dict。済み）、バイトの並び（Bytes）、ファイルに書く鍵、複数のファイル（部品） | 字句解析を Akashi で書ける |
 | 5 | Akashi でコンパイラを書く（`compiler/*.ak`）。今の JS のコンパイラ（段階0）でそれをコンパイルして `akashic.wasm`（段階1）を作る | `akashic.wasm` が `examples/` を正しくコンパイルする |
 | 6 | `akashic.wasm` で自分をコンパイルして段階2を作り、段階1と**1バイトも違わない**ことを確かめる（不動点） | テストで毎回確かめる。JS のコンパイラは「種」として残し、別の道で作った結果と比べる（[11]） |
 
