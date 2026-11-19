@@ -411,3 +411,58 @@ test('the Akashi type checker gives the same answer in the interpreter, on the c
   assert.equal(r.output, 'ok\n');
   assert.ok(ms < 60000, `took ${ms} ms`);
 });
+
+// ---- コード生成（compiler/wasm.ak）----
+import { openOutFolder } from '../src/folder.js';
+
+// Akashi で書いたコンパイラが、JS のコンパイラ（src/wasm.js）と1バイトも違わない .wasm を書くもの。
+// 扱える範囲を広げたら、ここに足す（減ったらテストが落ちる）
+const compilesSame = [
+  'examples/bad/lib/has_main.ak', 'examples/bad/r500-requires.ak', 'examples/bad/r501-ensures.ak', 'examples/bad/r503-div-zero.ak', 'examples/bad/r505-deep.ak',
+  'examples/gcd.ak', 'examples/hello.ak',
+  'test/compile/arith.ak', 'test/compile/fail-deep.ak', 'test/compile/fail-div.ak', 'test/compile/fail-ensures.ak', 'test/compile/fail-overflow-add.ak',
+  'test/compile/fail-overflow.ak', 'test/compile/fail-requires.ak', 'test/compile/logic.ak', 'test/compile/text.ak',
+];
+
+test('the Akashi compiler (compiled to wasm) writes the same .wasm bytes as src/wasm.js, or says E600 for what it does not support yet', () => {
+  const bdriver = join(root, 'compiler', 'build_main.ak');
+  const b = buildSource(readFileSync(bdriver, 'utf8'), { file: bdriver });
+  assert.ok(b.ok, JSON.stringify(b.diagnostics));
+  const copies = new Map();
+  const same = [];
+  for (const f of files) {
+    const js = buildSource(readFileSync(f, 'utf8'), { file: f });
+    if (!js.ok) continue;
+    const d = dirname(f);
+    if (!copies.has(d)) {
+      const t = mkdtempSync(join(tmpdir(), 'akashi-build-'));
+      cpSync(d, t, { recursive: true });
+      copies.set(d, t);
+    }
+    writeFileSync(join(copies.get(d), 'main.txt'), basename(f));
+    const outDir = mkdtempSync(join(tmpdir(), 'akashi-build-out-'));
+    let out = '';
+    let err = '';
+    const label = f.slice(root.length);
+    const exit = runWasm(b.bytes, { stdout: (s) => { out += s; }, stderr: (s) => { err += s; }, folder: openFolder(copies.get(d)), outFolder: openOutFolder(outDir) });
+    assert.equal(exit, 0, `${label}\n${err}`);
+    if (out.startsWith('E600 ')) continue;
+    assert.equal(out, 'ok\n', label);
+    assert.deepEqual(readFileSync(join(outDir, 'out.wasm')), Buffer.from(js.bytes), label);
+    same.push(label);
+    rmSync(outDir, { recursive: true });
+  }
+  assert.deepEqual(compilesSame.filter((f) => !same.includes(f)), [], 'these files should compile to the same bytes');
+});
+
+test('the Akashi compiler gives the same bytes in the interpreter', () => {
+  const bdriver = join(root, 'compiler', 'build_main.ak');
+  const dir = mkdtempSync(join(tmpdir(), 'akashi-build-i-'));
+  const outDir = mkdtempSync(join(tmpdir(), 'akashi-build-i-out-'));
+  const f = join(root, 'examples', 'gcd.ak');
+  writeFileSync(join(dir, 'main.ak'), readFileSync(f, 'utf8'));
+  const r = runSource(readFileSync(bdriver, 'utf8'), { file: bdriver, grants: { folder: dir, outFolder: outDir } });
+  assert.equal(r.ok, true, JSON.stringify(r.diagnostics));
+  assert.equal(r.output, 'ok\n');
+  assert.deepEqual(readFileSync(join(outDir, 'out.wasm')), Buffer.from(buildSource(readFileSync(f, 'utf8'), { file: f }).bytes));
+});

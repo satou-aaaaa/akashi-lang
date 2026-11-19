@@ -3,6 +3,13 @@
 版の決め方：試作のあいだは 0.x。言語の決まりが変わる（前に通ったプログラムが通らなくなる）ときは、2つめの数を上げる。
 形は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) にならう。
 
+## 0.18.0 — 2026-11-19
+
+### 足した
+- Akashi で書いたコード生成 `compiler/wasm.ak` と入口 `compiler/build_main.ak`（セルフホストの段階5の最後の部品、その1歩め）。Int・Bool・Str・Unit・関数・if・let・演算・約束・print・to_str を、JS のコンパイラと1バイトも違わない .wasm にする（例・テストの 16 ファイル）。まだ扱えないものは E600 で止まる。命令は JS と同じ名前の文字（`localGet 0 i32Load 0`）で書き、小さな組み立て器がバイトにする。
+- 型の検査 `compiler/check.ak` が、式ごとの型を覚えて返す（`check_all`）。コード生成が使う。
+- use をたどってファイルを読む部分を `compiler/files.ak` に分けた（型の検査とコード生成の入口が両方使う）。
+
 ## 0.17.0 — 2026-11-19
 
 ### 足した
