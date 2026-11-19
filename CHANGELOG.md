@@ -6,6 +6,8 @@
 ## 0.6.0 — 2026-11-19
 
 ### 足した
+- 遊べるページ（`index.html`・`playground/`）：ブラウザだけで検査・実行・Wasm で実行・整える。外へは通信しない（CSP で止める）。Folder の鍵は渡さない。コードは URL の # にだけ入れて共有。
+- 処理系を Node の部品を使わない `src/core.js` と、Node だけの `src/index.js`・`src/folder.js` に分けた（ブラウザでも同じ処理系を動かすため）。
 - `akashi fmt`：書式を決まった形に整える（意味は変えない・2回かけても同じ、をテストで確かめる）。
 - ライセンスを MIT にした。
 - コンパイラ（段階1）：`akashi build` で WebAssembly（WASI のコマンド）に0から書き出す。`akashi wasm` で動かす。Int・Bool・Str・Unit・関数・再帰・let・if・when・requires・ensures・print・to_str・str_len。ほかは E600。

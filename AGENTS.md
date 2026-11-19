@@ -15,6 +15,9 @@ npm test
 
 ## 決まり
 
+- ブラウザで動く部品（src/core.js からたどれるもの・playground/）は Node の部品を使わない（test/playground.test.js が見る）。Node だけの処理は src/index.js・src/folder.js・bin/ に置く。
+- 遊べるページ（index.html）は GitHub Pages（main の /）でそのまま公開される。外へ通信する部品を足さない（CSP を広げない）。
+
 - 依存を足さない（package.json の依存の欄は空、import は Node の標準の部品と自分のファイルだけ。test/deps.test.js が見る）。理由と例外の手順は docs/security.md「使う道具の決まり」。
 - コンパイラ（src/wasm.js）の意味の正はインタプリタ（src/run.js）。コンパイラで扱える書き方を足したら test/compile/ に境目の見本を足す（両方で同じ答えかをテストが比べる）。
 
