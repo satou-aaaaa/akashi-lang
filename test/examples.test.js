@@ -5,6 +5,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { checkSource, runSource } from '../src/index.js';
 
 const dir = new URL('../examples/', import.meta.url);
+// 「# grant: <フォルダ>」の行があれば、そのフォルダを Folder として渡す（CLI の --allow-read と同じ）
+const grantOf = (src) => ({ folder: src.match(/^# grant: (.+)$/m)?.[1] });
 const read = (name) => readFileSync(new URL(name, dir), 'utf8');
 
 for (const f of readdirSync(dir).filter((x) => x.endsWith('.ak'))) {
@@ -12,7 +14,7 @@ for (const f of readdirSync(dir).filter((x) => x.endsWith('.ak'))) {
     const src = read(f);
     const c = checkSource(src);
     assert.deepEqual(c.diagnostics, []);
-    const r = runSource(src);
+    const r = runSource(src, { grants: grantOf(src) });
     assert.equal(r.ok, true, JSON.stringify(r.diagnostics));
     assert.equal(r.output, read(f.replace(/\.ak$/, '.out')));
   });
@@ -23,7 +25,7 @@ for (const f of readdirSync(badDir).filter((x) => x.endsWith('.ak'))) {
   test(`bad: ${f}`, () => {
     const src = readFileSync(new URL(f, badDir), 'utf8');
     const want = src.match(/^# expect: (\w+)/)[1];
-    const r = runSource(src);
+    const r = runSource(src, { grants: grantOf(src) });
     assert.equal(r.ok, false);
     assert.equal(r.diagnostics[0].code, want, JSON.stringify(r.diagnostics, null, 2));
     for (const d of r.diagnostics) {

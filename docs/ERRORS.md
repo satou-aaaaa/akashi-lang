@@ -15,17 +15,20 @@ Every diagnostic has `code`, `message`, `line`, `col` and `fix` (what to write i
 | [E105](#e105) | and/or mixed without parentheses |
 | [E106](#e106) | chained comparison |
 | [E107](#e107) | if without else |
+| [E108](#e108) | extra end |
 | [E200](#e200) | unknown name |
 | [E201](#e201) | type mismatch |
 | [E202](#e202) | wrong arguments |
 | [E203](#e203) | name reused |
 | [E206](#e206) | positional argument |
 | [E207](#e207) | arguments out of order |
-| [E300](#e300) | effect not declared |
+| [E300](#e300) | capability not given |
 | [E301](#e301) | no main |
-| [E302](#e302) | unknown effect |
+| [E302](#e302) | unknown effect (retired in v0.2: effects were replaced by capabilities) |
 | [E303](#e303) | bad main signature |
-| [E304](#e304) | impure function passed as value |
+| [E304](#e304) | function with capabilities passed as value |
+| [E305](#e305) | effects clause (replaced by capabilities) |
+| [E309](#e309) | capability stored, returned or compared |
 | [E401](#e401) | missing ensures |
 | [E402](#e402) | missing example |
 | [R500](#r500) | requires failed |
@@ -35,14 +38,17 @@ Every diagnostic has `code`, `message`, `line`, `col` and `fix` (what to write i
 | [R504](#r504) | integer overflow |
 | [R505](#r505) | recursion too deep |
 | [R506](#r506) | index out of range |
+| [R507](#r507) | path escapes the folder |
+| [R508](#r508) | file not readable |
+| [R509](#r509) | capability not granted |
 
 ## E100
 
 syntax error.
 
 ```
-fn main() -> Unit effects io {
-  print(value: 1)
+fn main(console: Console) -> Unit {
+  print(to: console, value: 1)
 }
 ```
 
@@ -54,7 +60,7 @@ fn main() -> Unit effects io {
 unsupported literal.
 
 ```
-fn main() -> Unit effects io do print(value: 1.5) end
+fn main(console: Console) -> Unit do print(to: console, value: 1.5) end
 ```
 
 - message: decimal numbers are not supported
@@ -65,10 +71,10 @@ fn main() -> Unit effects io do print(value: 1.5) end
 missing return type.
 
 ```
-fn main() effects io do print(value: 1) end
+fn main(console: Console) do print(to: console, value: 1) end
 ```
 
-- message: expected '->' and a return type but found 'effects'
+- message: expected '->' and a return type but found 'do'
 - fix: every function declares its return type, e.g. -> Int; write -> Unit when it returns nothing
 
 ## E103
@@ -76,9 +82,9 @@ fn main() effects io do print(value: 1) end
 let needs a type.
 
 ```
-fn main() -> Unit effects io do
+fn main(console: Console) -> Unit do
   let x = 1
-  print(value: x)
+  print(to: console, value: x)
 end
 ```
 
@@ -94,7 +100,7 @@ fn f(x: Integer) -> Int ensures true example f(x: 1) == 1 do x end
 ```
 
 - message: unknown type 'Integer'
-- fix: types are Int, Bool, Str, Unit, List; lists are written List[Int]
+- fix: types are Int, Bool, Str, Unit, List, Console, Folder; lists are written List[Int]
 
 ## E105
 
@@ -129,13 +135,26 @@ fn f(x: Int) -> Int ensures true example f(x: 1) == 1 do if x > 0 then 1 end end
 - message: 'if' has no 'else'
 - fix: every if is an expression and needs else: if c then a else b end (use else () when the value is Unit)
 
+## E108
+
+extra end.
+
+```
+fn sign(n: Int) -> Int ensures true example sign(n: 5) == 1 do
+  if n > 0 then 1 else 0 end end
+end
+```
+
+- message: extra 'end'
+- fix: every if ... then ... else ... end and every fn ... do ... end needs exactly one end. An else if is a new if inside else, so it needs its own end too: count one end per if
+
 ## E200
 
 unknown name.
 
 ```
 fn double(x: Int) -> Int ensures result == x * 2 example double(x: 2) == 4 do x * 2 end
-fn main() -> Unit effects io do print(value: dubble(x: 3)) end
+fn main(console: Console) -> Unit do print(to: console, value: dubble(x: 3)) end
 ```
 
 - message: unknown function 'dubble'
@@ -168,10 +187,10 @@ fn area(w: Int, h: Int) -> Int ensures result >= 0 example area(w: 2) == 0 do w 
 name reused.
 
 ```
-fn main() -> Unit effects io do
+fn main(console: Console) -> Unit do
   let x: Int = 1
   let x: Int = 2
-  print(value: x)
+  print(to: console, value: x)
 end
 ```
 
@@ -202,14 +221,15 @@ fn area(w: Int, h: Int) -> Int ensures result >= 0 example area(h: 3, w: 2) == 6
 
 ## E300
 
-effect not declared.
+capability not given.
 
 ```
-fn shout(s: Str) -> Unit ensures true example shout(s: "a") == () do print(value: s) end
+fn shout(text: Str) -> Unit do print(to: console, value: text) end
+fn main(console: Console) -> Unit do shout(text: "hi") end
 ```
 
-- message: 'print' has effect io but fn shout does not allow it
-- fix: add 'effects io' to fn shout (before do), or move this call into a function that has effects io
+- message: 'print' needs a Console but fn shout was not given one
+- fix: add a parameter console: Console to fn shout and pass it from the caller (main receives it)
 
 ## E301
 
@@ -217,22 +237,64 @@ no main.
 
 ## E302
 
-unknown effect.
+unknown effect (retired in v0.2: effects were replaced by capabilities).
 
-```
-fn main() -> Unit effects io, net do print(value: 1) end
-```
-
-- message: unknown effect 'net'
-- fix: the only effect is io (printing). Remove other effects
+This code is no longer produced. Its number is not reused.
 
 ## E303
 
 bad main signature.
 
+```
+fn main(console: Console, n: Int) -> Unit do print(to: console, value: n) end
+```
+
+- message: main may only take capabilities (each type once) and must return Unit
+- fix: write fn main(console: Console) -> Unit do ... end; add folder: Folder only if the program reads files
+
 ## E304
 
-impure function passed as value.
+function with capabilities passed as value.
+
+```
+fn show(console: Console, x: Int) -> Unit do print(to: console, value: x) end
+fn main(console: Console) -> Unit do
+  let u: List[Unit] = map(list: [1], func: show)
+  print(to: console, value: 1)
+end
+```
+
+- message: 'show' takes a capability and cannot be passed as a value
+- fix: only pure functions (no Console / Folder parameters) can be passed to map / filter / fold
+
+## E305
+
+effects clause (replaced by capabilities).
+
+```
+fn main() -> Unit
+  effects io
+do
+  print(value: 1)
+end
+```
+
+- message: 'effects' is not used: authority is passed as capability parameters
+- fix: remove the effects line and take the capability as a parameter, e.g. fn main(console: Console, ...) -> ...; call print(to: console, value: ...)
+
+## E309
+
+capability stored, returned or compared.
+
+```
+fn main(console: Console) -> Unit do
+  let c: Console = console
+  print(to: c, value: 1)
+end
+```
+
+- message: let c holds a capability (Console)
+- fix: capabilities cannot be stored; pass the parameter itself, e.g. print(to: console, ...)
 
 ## E401
 
@@ -262,7 +324,7 @@ requires failed.
 
 ```
 fn half(n: Int) -> Int requires n % 2 == 0 ensures true example half(n: 4) == 2 do n / 2 end
-fn main() -> Unit effects io do print(value: half(n: 3)) end
+fn main(console: Console) -> Unit do print(to: console, value: half(n: 3)) end
 ```
 
 - message: requires of 'half' failed: n % 2 == 0 (with n=3)
@@ -274,7 +336,7 @@ ensures failed.
 
 ```
 fn abs(x: Int) -> Int ensures result >= 0 example abs(x: 0) == 0 do x end
-fn main() -> Unit effects io do print(value: abs(x: -5)) end
+fn main(console: Console) -> Unit do print(to: console, value: abs(x: -5)) end
 ```
 
 - message: ensures of 'abs' failed: result >= 0 (result=-5, x=-5)
@@ -296,7 +358,7 @@ fn inc(x: Int) -> Int ensures true example inc(x: 1) == 3 do x + 1 end
 division by zero.
 
 ```
-fn main() -> Unit effects io do print(value: 1 / 0) end
+fn main(console: Console) -> Unit do print(to: console, value: 1 / 0) end
 ```
 
 - message: division by zero
@@ -312,7 +374,7 @@ recursion too deep.
 
 ```
 fn loop(n: Int) -> Int ensures true example loop(n: 0) == 0 do if n == 0 then 0 else loop(n: n + 1) end end
-fn main() -> Unit effects io do print(value: loop(n: 1)) end
+fn main(console: Console) -> Unit do print(to: console, value: loop(n: 1)) end
 ```
 
 - message: recursion deeper than 500 calls in 'loop'
@@ -323,8 +385,49 @@ fn main() -> Unit effects io do print(value: loop(n: 1)) end
 index out of range.
 
 ```
-fn main() -> Unit effects io do print(value: get(list: [1, 2], index: 5)) end
+fn main(console: Console) -> Unit do print(to: console, value: get(list: [1, 2], index: 5)) end
 ```
 
 - message: index 5 is out of range for a list of length 2
 - fix: check 0 <= index and index < len(list: ...) before calling get
+
+## R507
+
+path escapes the folder.
+
+```
+# run with --allow-read examples/files
+fn main(console: Console, folder: Folder) -> Unit do
+  print(to: console, value: read_text(from: folder, path: "../../package.json"))
+end
+```
+
+- message: path '../../package.json' is not inside the folder
+- fix: use a relative path without .. such as "data/input.txt"
+
+## R508
+
+file not readable.
+
+```
+# run with --allow-read examples/files
+fn main(console: Console, folder: Folder) -> Unit do
+  print(to: console, value: read_text(from: folder, path: "nothing.txt"))
+end
+```
+
+- message: cannot read 'nothing.txt' (it does not exist)
+- fix: check the file name; paths are relative to the folder given with --allow-read
+
+## R509
+
+capability not granted.
+
+```
+fn main(console: Console, folder: Folder) -> Unit do
+  print(to: console, value: read_text(from: folder, path: "fruits.txt"))
+end
+```
+
+- message: main asks for a Folder ('folder') but none was granted
+- fix: run with --allow-read <folder> to let this program read files in that folder (and nowhere else)

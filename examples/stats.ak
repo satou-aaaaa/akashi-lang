@@ -30,12 +30,11 @@ do
   x % 2 == 0
 end
 
-fn main() -> Unit
-  effects io
+fn main(console: Console) -> Unit
 do
   let data: List[Int] = [3, 8, 1, 6, 10]
   let evens: List[Int] = filter(list: data, func: is_even)
-  print(value: "sum = " ++ to_str(value: sum(xs: data)))
-  print(value: "mean = " ++ to_str(value: mean(xs: data)))
-  print(value: evens)
+  print(to: console, value: "sum = " ++ to_str(value: sum(xs: data)))
+  print(to: console, value: "mean = " ++ to_str(value: mean(xs: data)))
+  print(to: console, value: evens)
 end

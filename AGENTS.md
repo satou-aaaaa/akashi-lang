@@ -18,6 +18,8 @@ npm test
 - コードを足したら `examples/bad/<コード>-<名前>.ak`（1行目に `# expect: <コード>`）を足し、`node scripts/gen-errors.mjs` で docs/ERRORS.md を作り直す（テストが見本の抜けと古さを落とす）。
 - どの診断にも、位置と「次にどう書けば通るか」の fix を付ける（テストが見る）。
 - 言語の決まりを変えたら docs/SPEC.md も同じ PR で直す。SPEC は AI に貼る文書なので短く保つ。
+- 外に触る組み込み関数を足すときは、必ず権利の型（Console・Folder の仲間）を引数に取らせる。どこからでも呼べる外への関数は作らない。
+- もう出さないコードは src/errors.js の RETIRED に入れ、番号を使い回さない。
 - 実行時の深さは JS の呼び出しの深さに合わせて 500 まで（src/run.js の MAX_DEPTH）。
 
 ## 共通のきまり

@@ -1,5 +1,5 @@
 # expect: E103
-fn main() -> Unit effects io do
+fn main(console: Console) -> Unit do
   let x = 1
-  print(value: x)
+  print(to: console, value: x)
 end

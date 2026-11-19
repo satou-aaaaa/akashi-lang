@@ -5,7 +5,13 @@ export const INT = { k: 'Int' };
 export const BOOL = { k: 'Bool' };
 export const STR = { k: 'Str' };
 export const UNIT = { k: 'Unit' };
-const ERR = { k: 'Err' }; // 先のエラーの続きで出る2つめのエラーを止める
+const ERR = { k: 'Err' };
+export const CONSOLE = { k: 'Console' };
+export const FOLDER = { k: 'Folder' };
+// 権利（ケーパビリティ）の型。値を作る方法は無く、main が受け取って引数で渡すだけ
+const CAPS = ['Console', 'Folder'];
+const isCap = (t) => CAPS.includes(prune(t).k);
+const hasCap = (t) => { t = prune(t); return isCap(t) || (t.k === 'List' && hasCap(t.of)); }; // 先のエラーの続きで出る2つめのエラーを止める
 const List = (of) => ({ k: 'List', of });
 const Fn = (params, ret) => ({ k: 'Fn', params, ret });
 let varId = 0;
@@ -50,16 +56,18 @@ export function typeStr(t) {
 
 // 組み込み関数。呼ぶたびに型変数を新しくする。引数はすべて名前つき。
 export const BUILTINS = {
-  print: () => ({ params: [['value', fresh()]], ret: UNIT, effects: ['io'] }),
-  len: () => ({ params: [['list', List(fresh())]], ret: INT, effects: [] }),
-  str_len: () => ({ params: [['text', STR]], ret: INT, effects: [] }),
-  to_str: () => ({ params: [['value', fresh()]], ret: STR, effects: [] }),
-  range: () => ({ params: [['from', INT], ['to', INT]], ret: List(INT), effects: [] }),
-  get: () => { const a = fresh(); return { params: [['list', List(a)], ['index', INT]], ret: a, effects: [] }; },
-  append: () => { const a = fresh(); return { params: [['list', List(a)], ['item', a]], ret: List(a), effects: [] }; },
-  map: () => { const a = fresh(); const b = fresh(); return { params: [['list', List(a)], ['func', Fn([a], b)]], ret: List(b), effects: [] }; },
-  filter: () => { const a = fresh(); return { params: [['list', List(a)], ['func', Fn([a], BOOL)]], ret: List(a), effects: [] }; },
-  fold: () => { const a = fresh(); const b = fresh(); return { params: [['list', List(a)], ['init', b], ['func', Fn([b, a], b)]], ret: b, effects: [] }; },
+  print: () => ({ params: [['to', CONSOLE], ['value', fresh()]], ret: UNIT }),
+  read_text: () => ({ params: [['from', FOLDER], ['path', STR]], ret: STR }),
+  lines: () => ({ params: [['text', STR]], ret: List(STR) }),
+  len: () => ({ params: [['list', List(fresh())]], ret: INT }),
+  str_len: () => ({ params: [['text', STR]], ret: INT }),
+  to_str: () => ({ params: [['value', fresh()]], ret: STR }),
+  range: () => ({ params: [['from', INT], ['to', INT]], ret: List(INT) }),
+  get: () => { const a = fresh(); return { params: [['list', List(a)], ['index', INT]], ret: a }; },
+  append: () => { const a = fresh(); return { params: [['list', List(a)], ['item', a]], ret: List(a) }; },
+  map: () => { const a = fresh(); const b = fresh(); return { params: [['list', List(a)], ['func', Fn([a], b)]], ret: List(b) }; },
+  filter: () => { const a = fresh(); return { params: [['list', List(a)], ['func', Fn([a], BOOL)]], ret: List(a) }; },
+  fold: () => { const a = fresh(); const b = fresh(); return { params: [['list', List(a)], ['init', b], ['func', Fn([b, a], b)]], ret: b }; },
 };
 
 function fromAst(t) {
@@ -86,7 +94,6 @@ export function check(program) {
   const sigOf = (f) => ({
     params: f.params.map((p) => [p.name, fromAst(p.type)]),
     ret: fromAst(f.ret),
-    effects: f.effects.map((e) => e.name),
   });
 
   const allNames = (env) => [...env.keys(), ...fns.keys(), ...Object.keys(BUILTINS)];
@@ -103,6 +110,7 @@ export function check(program) {
         err('E203', `the name '${l.name}' is already used`, l.pos, `names cannot be reused or shadowed; pick a new name such as ${l.name}2 or a more specific one`);
       }
       const want = fromAst(l.type);
+      if (hasCap(want)) err('E309', `let ${l.name} holds a capability (${typeStr(want)})`, l.pos, 'capabilities cannot be stored; pass the parameter itself, e.g. print(to: console, ...)');
       const got = expr(l.value, scope, ctx);
       if (!unify(want, got)) {
         err('E201', `let ${l.name} is declared ${typeStr(want)} but the value is ${typeStr(got)}`, l.pos, `change the declared type to ${typeStr(got)} or change the value`);
@@ -122,8 +130,9 @@ export function check(program) {
         if (env.has(e.name)) return env.get(e.name);
         if (fns.has(e.name)) {
           const s = sigOf(fns.get(e.name));
-          if (s.effects.length) {
-            err('E304', `'${e.name}' has effects and cannot be passed as a value`, e.pos, 'only pure functions (no effects) can be passed to map / filter / fold');
+          if (s.params.some(([, t]) => isCap(t))) {
+            err('E304', `'${e.name}' takes a capability and cannot be passed as a value`, e.pos, 'only pure functions (no Console / Folder parameters) can be passed to map / filter / fold');
+            return ERR;
           }
           return Fn(s.params.map(([, t]) => t), s.ret);
         }
@@ -139,6 +148,7 @@ export function check(program) {
         const item = fresh();
         e.items.forEach((it, idx) => {
           const t = expr(it, env, ctx);
+          if (isCap(t)) err('E309', 'capabilities cannot be put in a list', it.pos ?? e.pos, 'pass the capability itself as an argument instead');
           if (!unify(item, t)) err('E201', `list item ${idx + 1} is ${typeStr(t)} but earlier items are ${typeStr(item)}`, it.pos ?? e.pos, 'all items in a list must have the same type');
         });
         return List(item);
@@ -191,6 +201,7 @@ export function check(program) {
       case '==': case '!=':
         if (!unify(l, r)) err('E201', `cannot compare ${typeStr(l)} with ${typeStr(r)}`, e.pos, 'both sides of == and != must have the same type');
         if (prune(l).k === 'Fn') err('E201', 'functions cannot be compared', e.pos, 'compare the results of calling them instead');
+        if (isCap(l)) err('E309', 'capabilities cannot be compared', e.pos, 'capabilities are only passed along as arguments');
         return BOOL;
       case '++': {
         const pl = prune(l);
@@ -242,38 +253,41 @@ export function check(program) {
       }
     }
     for (const a of e.args) {
+      const p = a.name !== null && sig.params.find(([n]) => n === a.name);
+      if (p && isCap(p[1]) && a.value.k === 'var' && !env.has(a.value.name)) {
+        const capType = prune(p[1]).k;
+        const own = [...env.entries()].find(([, t]) => prune(t).k === capType);
+        const where = ctx.where === 'body' ? `fn ${ctx.fn}` : `this ${ctx.where}`;
+        err('E300', `'${e.name}' needs a ${capType} but ${where} was not given one${own ? ` (it has '${own[0]}')` : ''}`, a.pos,
+          ctx.where !== 'body' ? `${ctx.where} must be pure and cannot use capabilities; remove the call to ${e.name}`
+            : own ? `pass the one you have: ${a.name}: ${own[0]}`
+              : `add a parameter ${capType.toLowerCase()}: ${capType} to fn ${ctx.fn} and pass it from the caller (main receives it)`);
+        continue;
+      }
       const t = expr(a.value, env, ctx);
       if (!argsOk || a.name === null) continue;
-      const want = sig.params.find(([n]) => n === a.name)[1];
+      const want = p[1];
       if (!unify(want, t)) {
         err('E201', `argument '${a.name}' of '${e.name}' must be ${typeStr(want)} but got ${typeStr(t)}`, a.pos, prune(want).k === 'Fn' ? `pass the name of a pure function of type ${typeStr(want)}` : `pass a ${typeStr(want)}`);
-      }
-    }
-    for (const eff of sig.effects) {
-      if (!ctx.effects.includes(eff)) {
-        const fix = ctx.where === 'body'
-          ? `add 'effects ${eff}' to fn ${ctx.fn} (before do), or move this call into a function that has effects ${eff}`
-          : `${ctx.where} must be pure; remove the call to ${e.name}`;
-        err('E300', `'${e.name}' has effect ${eff} but ${ctx.where === 'body' ? `fn ${ctx.fn}` : `this ${ctx.where}`} does not allow it`, e.pos, fix);
       }
     }
     return sig.ret;
   }
 
   for (const f of fns.values()) {
-    for (const ef of f.effects) {
-      if (ef.name !== 'io') err('E302', `unknown effect '${ef.name}'`, ef.pos, 'the only effect is io (printing). Remove other effects');
+    const caps = f.params.filter((p) => isCap(fromAst(p.type)));
+    const pure = caps.length === 0 && f.name !== 'main'; // main は入口なので約束と見本は要らない
+    for (const p of f.params) {
+      const t = fromAst(p.type);
+      if (!isCap(t) && hasCap(t)) err('E309', `parameter '${p.name}' puts a capability inside ${typeStr(t)}`, p.pos, `take the capability directly: ${p.name}: ${typeStr(t).replace(/^List\[(.*)\]$/, '$1')}`);
     }
-    const pure = f.effects.length === 0 && f.name !== 'main'; // main は入口なので約束と見本は要らない
+    if (hasCap(fromAst(f.ret))) err('E309', `fn ${f.name} returns a capability`, f.pos, 'capabilities cannot be returned; only main receives them and passes them down as arguments');
     const sample = callTemplate(f.name, f.params.map((p) => [p.name]));
-    if (pure && f.ensures.length === 0) {
-      err('E401', `pure function '${f.name}' has no ensures`, f.pos, `add a promise about the result before do, e.g. ensures result >= 0 (write ensures true only if nothing can be promised)`);
-    }
-    if (pure && f.examples.length === 0) {
-      err('E402', `pure function '${f.name}' has no example`, f.pos, `add at least one example before do, e.g. example ${sample.replace(/\.\.\./g, '<value>')} == <expected>`);
-    }
-    if (f.name === 'main' && (f.params.length > 0 || f.ret.k !== 'Unit')) {
-      err('E303', 'main must take no parameters and return Unit', f.pos, 'write fn main() -> Unit effects io do ... end');
+    if (f.name === 'main') {
+      const kinds = f.params.map((p) => fromAst(p.type).k);
+      if (f.ret.k !== 'Unit' || f.params.some((p) => !isCap(fromAst(p.type))) || new Set(kinds).size !== kinds.length) {
+        err('E303', 'main may only take capabilities (each type once) and must return Unit', f.pos, 'write fn main(console: Console) -> Unit do ... end; add folder: Folder only if the program reads files');
+      }
     }
 
     const env = new Map();
@@ -283,17 +297,30 @@ export function check(program) {
       }
       env.set(p.name, fromAst(p.type));
     }
-    const pureCtx = (where) => ({ effects: [], where, fn: f.name });
+    const pureCtx = (where) => ({ where, fn: f.name });
+    // 約束（requires / ensures）の中では権利を使えない
+    const envPure = new Map([...env].filter(([, t]) => !isCap(t)));
     for (const r of f.requires) {
-      const t = expr(r.expr, env, pureCtx('requires'));
+      const t = expr(r.expr, envPure, pureCtx('requires'));
       if (!unify(BOOL, t)) err('E201', `requires must be Bool but is ${typeStr(t)}`, r.expr.pos, 'write a condition, e.g. requires n >= 0');
     }
     const ret = fromAst(f.ret);
-    const got = checkBlock(f.body, env, { effects: f.effects.map((x) => x.name), where: 'body', fn: f.name });
+    const before = diags.length;
+    const got = checkBlock(f.body, env, { where: 'body', fn: f.name });
     if (!unify(ret, got)) {
       err('E201', `fn ${f.name} must return ${typeStr(ret)} but its body gives ${typeStr(got)}`, f.body.result.pos ?? f.pos, `make the last expression of the body a ${typeStr(ret)}, or change -> ${typeStr(ret)}`);
     }
-    const envR = new Map(env);
+    // 本体が権利を求めて E300 になった関数は、純粋のつもりではないので約束・見本の催促（E401・E402）は出さない
+    const needsCap = diags.slice(before).some((d) => d.code === 'E300');
+    if (!needsCap) {
+      if (pure && f.ensures.length === 0) {
+        err('E401', `pure function '${f.name}' has no ensures`, f.pos, `add a promise about the result before do, e.g. ensures result >= 0 (write ensures true only if nothing can be promised)`);
+      }
+      if (pure && f.examples.length === 0) {
+        err('E402', `pure function '${f.name}' has no example`, f.pos, `add at least one example before do, e.g. example ${sample.replace(/\.\.\./g, '<value>')} == <expected>`);
+      }
+    }
+    const envR = new Map(envPure);
     if (!envR.has('result')) envR.set('result', ret);
     for (const en of f.ensures) {
       const t = expr(en.expr, envR, pureCtx('ensures'));

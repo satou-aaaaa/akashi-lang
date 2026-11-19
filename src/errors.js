@@ -10,17 +10,20 @@ export const CODES = {
   E105: 'and/or mixed without parentheses',
   E106: 'chained comparison',
   E107: 'if without else',
+  E108: 'extra end',
   E200: 'unknown name',
   E201: 'type mismatch',
   E202: 'wrong arguments',
   E203: 'name reused',
   E206: 'positional argument',
   E207: 'arguments out of order',
-  E300: 'effect not declared',
+  E300: 'capability not given',
   E301: 'no main',
-  E302: 'unknown effect',
+  E302: 'unknown effect (retired in v0.2: effects were replaced by capabilities)',
   E303: 'bad main signature',
-  E304: 'impure function passed as value',
+  E304: 'function with capabilities passed as value',
+  E305: 'effects clause (replaced by capabilities)',
+  E309: 'capability stored, returned or compared',
   E401: 'missing ensures',
   E402: 'missing example',
   R500: 'requires failed',
@@ -30,7 +33,13 @@ export const CODES = {
   R504: 'integer overflow',
   R505: 'recursion too deep',
   R506: 'index out of range',
+  R507: 'path escapes the folder',
+  R508: 'file not readable',
+  R509: 'capability not granted',
 };
+
+// もう出さないコード（意味は変えず、番号を使い回さない）
+export const RETIRED = ['E302'];
 
 export function diag(code, message, pos, fix, extra = {}) {
   return {
